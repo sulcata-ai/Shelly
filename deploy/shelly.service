@@ -1,0 +1,25 @@
+# Shelly as a systemd *user* service on the Jetson (linger is on, so it runs
+# without a login session and starts at boot). Install by copying, not linking:
+# the SSD mounts late (nofail), and a link into it would not load at boot.
+#
+#   cp deploy/shelly.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now shelly
+[Unit]
+Description=Shelly, the Telegram assistant
+# Keep retrying forever: at boot the SSD and the network can both lag behind the
+# user manager, and ExecStartPre fails until the SSD is there.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/media/SSD/Sulcata AI/Shelly
+ExecStartPre=/usr/bin/test -f "/media/SSD/Sulcata AI/Shelly/.env"
+ExecStart="/media/SSD/Sulcata AI/Shelly/.venv/bin/python" -m shelly
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/media/SSD/Sulcata AI/Shelly/logs/shelly.log
+StandardError=inherit
+
+[Install]
+WantedBy=default.target

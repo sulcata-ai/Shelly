@@ -10,8 +10,8 @@ give Claude tools, without changes to the core. The front end and dashboard live
 `../Shelly-Web-App` (Flask, deployed on Railway at sulcata.ai); Shelly itself runs on
 the Jetson.
 
-Status: **v1 runs end to end over Telegram (@sulcata_ai_bot); started by hand,
-not yet a service.** The roadmap at the bottom is the work tracker —
+Status: **v1 runs end to end over Telegram (@sulcata_ai_bot) as a systemd user
+service on the Jetson.** The roadmap at the bottom is the work tracker —
 keep it current as items land.
 
 ## Decisions
@@ -24,6 +24,27 @@ keep it current as items land.
 - **One operator.** Only chats listed in `TELEGRAM_ALLOWED_CHAT_IDS` are answered;
   every other update is dropped silently (logged, never replied to). A Telegram bot is
   publicly discoverable, and once tools can act, an open bot is an open door.
+
+## Running on the Jetson
+
+Shelly is the systemd **user** service `shelly` (linger is on, so it runs without a
+login and starts at boot). The unit's source is `deploy/shelly.service`; it is
+*copied* to `~/.config/systemd/user/`, not linked, because the SSD mounts late and
+a link into it would not load at boot. After editing it, copy it again and
+`systemctl --user daemon-reload`.
+
+```bash
+export XDG_RUNTIME_DIR=/run/user/$(id -u)   # needed from a non-login shell
+systemctl --user status shelly
+systemctl --user restart shelly              # after a code change
+tail -f logs/shelly.log                      # stdout+stderr, appended
+```
+
+`Restart=always` after 10s, with no start limit: a crash comes back on its own,
+and at boot it keeps retrying until the SSD and network are up. SIGTERM (stop,
+restart) shuts the poller down cleanly. Never also run `python -m shelly` by hand
+while the service is up: two pollers on one bot token fight over updates. Startup
+takes ~5s on the Jetson, most of it imports.
 
 ## Environment (`.env`, gitignored)
 
@@ -149,7 +170,7 @@ v1 — chat over Telegram with short-term memory
 - [ ] System prompt: who Shelly is, who the operator is, reply style for a phone
   (a short placeholder is in `core/prompt.py`)
 - [ ] Tests: allowlist, window rules, tool loop with a fake client, formatting
-- [ ] Run on the Jetson and survive a reboot (systemd service)
+- [x] Run on the Jetson and survive a reboot (systemd service)
 
 Later — candidates, not commitments
 - [ ] Long-term memory capability: tools to save and recall durable facts
@@ -158,3 +179,4 @@ Later — candidates, not commitments
 - [ ] Dashboard: conversation view and usage in `../Shelly-Web-App`
 - [ ] Usage/cost logging per turn (`response.usage`)
 - [ ] Approval prompts in Telegram before tools with side effects run
+- [ ] Rotate `logs/shelly.log` (it is appended to forever)
