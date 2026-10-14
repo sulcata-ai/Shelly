@@ -18,7 +18,10 @@ ExecStart="/media/SSD/Sulcata AI/Shelly/.venv/bin/python" -m shelly
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
-StandardOutput=append:/media/SSD/Sulcata AI/Shelly/logs/shelly.log
+# Python writes and rotates logs/shelly.log itself (shelly/logs.py). systemd's
+# own capture goes to a separate file: only what escapes logging lands there.
+Environment=SHELLY_LOG_FILE=logs/shelly.log
+StandardOutput=append:/media/SSD/Sulcata AI/Shelly/logs/shelly.stderr.log
 StandardError=inherit
 
 [Install]

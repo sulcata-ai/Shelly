@@ -1,9 +1,10 @@
 ''' python -m shelly: check the configuration, then run the Telegram channel '''
 
 import logging
+import os
 import sys
 
-from shelly import config
+from shelly import config, logs
 from shelly.capabilities import memory
 from shelly.channels import telegram
 from shelly.core import agent as core
@@ -19,9 +20,8 @@ log = logging.getLogger('shelly')
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
-    # httpx logs every Telegram long poll at INFO, which buries everything else.
-    logging.getLogger('httpx').setLevel(logging.WARNING)
+    # The service sets SHELLY_LOG_FILE; by hand, logs go to the terminal.
+    logs.configure(os.environ.get('SHELLY_LOG_FILE'))
 
     try:
         cfg = config.load()

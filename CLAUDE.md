@@ -37,8 +37,16 @@ a link into it would not load at boot. After editing it, copy it again and
 export XDG_RUNTIME_DIR=/run/user/$(id -u)   # needed from a non-login shell
 systemctl --user status shelly
 systemctl --user restart shelly              # after a code change
-tail -f logs/shelly.log                      # stdout+stderr, appended
+tail -f logs/shelly.log                      # the log, rotated by Python
+cat logs/shelly.stderr.log                   # only what escaped logging (crashes)
 ```
+
+Logging is `shelly/logs.py`: with `SHELLY_LOG_FILE` set (the unit sets it) Python
+writes and rotates `logs/shelly.log` itself, 5 MB × 5 old files; without it, logs go
+to stderr. Uncaught exceptions are logged too. Do not point systemd's
+`StandardOutput` at `shelly.log` or rotate it with logrotate: systemd keeps its
+append handle open across a rename and would write into the rotated copy. The
+Jetson has no persistent journal, so these files are the only record.
 
 `Restart=always` after 10s, with no start limit: a crash comes back on its own,
 and at boot it keeps retrying until the SSD and network are up. SIGTERM (stop,
@@ -229,4 +237,4 @@ Later — candidates, not commitments
 - [ ] Dashboard: conversation view and usage in `../Shelly-Web-App`
 - [x] Usage/cost logging per turn (`response.usage`)
 - [ ] Approval prompts in Telegram before tools with side effects run
-- [ ] Rotate `logs/shelly.log` (it is appended to forever)
+- [x] Rotate `logs/shelly.log` (it is appended to forever)
