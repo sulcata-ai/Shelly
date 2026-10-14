@@ -10,8 +10,8 @@ give Claude tools, without changes to the core. The front end and dashboard live
 `../Shelly-Web-App` (Flask, deployed on Railway at sulcata.ai); Shelly itself runs on
 the Jetson.
 
-Status: **scaffold, config, history store and core loop done (all tested with fakes);
-verified live against the API on 2026-10-14; not yet connected to Telegram.** The roadmap at the bottom is the work tracker —
+Status: **v1 runs end to end over Telegram (@sulcata_ai_bot); started by hand,
+not yet a service.** The roadmap at the bottom is the work tracker —
 keep it current as items land.
 
 ## Decisions
@@ -56,7 +56,8 @@ shelly/
 tests/
 ```
 
-Run with `.venv/bin/python -m shelly`. `shelly/config.py` reads `.env` once at
+Run with `.venv/bin/python -m shelly` (logs to stderr; `logs/` is gitignored for
+redirected output). `shelly/config.py` reads `.env` once at
 startup into a frozen `Config` and raises `ConfigError` listing every problem at
 once; an empty or missing allowlist is an error, never "everyone". `Config`'s repr
 leaves out the secrets, so it is safe to log. Tests are plain `unittest`:
@@ -121,9 +122,21 @@ Everything is kept; only the context window is limited.
 - Turns for one chat run one at a time (a per-chat lock), so history order is the
   order things happened.
 
-**Telegram output.** Claude writes Markdown; Telegram's MarkdownV2 rejects much of
-it. Convert to Telegram HTML, fall back to plain text if Telegram refuses it, and
-split at 4096 characters on paragraph boundaries. Show "typing…" while a turn runs.
+**Telegram.** `channels/telegram.py` polls (message updates only) and hands text from
+allowed chats to `Agent.reply()`. Strangers are logged and get nothing, not even
+"typing…". `/start` gets a fixed greeting; non-text messages get "text only for
+now". Updates are handled one at a time. Messages sent while Shelly was down are
+answered on restart. The agent is built in `post_init` by a `start()` coroutine
+from `__main__`, because the async Mongo and Anthropic clients must be created
+inside the loop `run_polling()` owns.
+
+`channels/telegram_format.py` converts Claude's Markdown to the HTML subset
+Telegram accepts (`b i s code pre a blockquote`), escaping everything else; code
+and links are held aside so emphasis rules cannot reach into them, `**` is the
+only bold (`__` is left alone — it is nearly always a dunder), and only http(s)
+links become links. `split()` cuts at 3800 characters on paragraph, then line,
+boundaries, and closes/reopens a code fence cut in half. Each piece is sent as
+HTML and falls back to plain text if Telegram rejects it or it grows past 4096.
 
 ## Roadmap
 
@@ -132,7 +145,7 @@ v1 — chat over Telegram with short-term memory
 - [x] `config.py`: load and validate `.env`, fail fast on anything missing
 - [x] `memory/history.py`: save, window (limit, leading-assistant drop, merge), index
 - [x] `core/agent.py` + `core/tools.py`: the loop and an empty registry
-- [ ] `channels/telegram.py`: polling, allowlist, typing indicator, HTML + split
+- [x] `channels/telegram.py`: polling, allowlist, typing indicator, HTML + split
 - [ ] System prompt: who Shelly is, who the operator is, reply style for a phone
   (a short placeholder is in `core/prompt.py`)
 - [ ] Tests: allowlist, window rules, tool loop with a fake client, formatting
