@@ -181,7 +181,7 @@ v1 — chat over Telegram with short-term memory
 - [x] `core/agent.py` + `core/tools.py`: the loop and an empty registry
 - [x] `channels/telegram.py`: polling, allowlist, typing indicator, HTML + split
 - [x] System prompt: who Shelly is, who the operator is, reply style for a phone
-- [ ] Write `profile.md` with the operator
+- [x] Write `profile.md` with the operator (local only)
 - [ ] Tests: allowlist, window rules, tool loop with a fake client, formatting
 - [x] Run on the Jetson and survive a reboot (systemd service)
 
