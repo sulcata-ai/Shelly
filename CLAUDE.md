@@ -10,7 +10,7 @@ give Claude tools, without changes to the core. The front end and dashboard live
 `../Shelly-Web-App` (Flask, deployed on Railway at sulcata.ai); Shelly itself runs on
 the Jetson.
 
-Status: **scaffold and config done; nothing talks to Telegram or Claude yet.** The roadmap at the bottom is the work tracker —
+Status: **scaffold, config and history store done; nothing talks to Telegram or Claude yet.** The roadmap at the bottom is the work tracker —
 keep it current as items land.
 
 ## Decisions
@@ -89,9 +89,13 @@ server-side refusal fallback (`fallbacks: "default"` with beta
 than becoming a dead message.
 
 **Conversation memory.** Collection `messages`, one document per message:
-`{chat_id, role: "user"|"assistant", text, created_at}`, index `(chat_id, created_at)`.
+`{chat_id, role: "user"|"assistant", text, created_at}`, index
+`(chat_id, created_at desc, _id desc)` — `_id` breaks same-millisecond ties.
 Everything is kept; only the context window is limited.
 
+- `History.add()` records, `History.window()` returns the API `messages` list, and
+  `build_window()` is the pure function the repairs below live in (tested without
+  Mongo). `connect(cfg)` returns the `AsyncMongoClient` (tz-aware) and the `History`.
 - The window is the last `HISTORY_LIMIT` (20) messages for the chat — roughly ten
   from each side — oldest first.
 - Only final text is stored and replayed: no thinking blocks, no tool calls or tool
@@ -114,7 +118,7 @@ split at 4096 characters on paragraph boundaries. Show "typing…" while a turn 
 v1 — chat over Telegram with short-term memory
 - [x] Repo scaffold: package layout, `requirements.txt`, `.venv`, `README.md`
 - [x] `config.py`: load and validate `.env`, fail fast on anything missing
-- [ ] `memory/history.py`: save, window (limit, leading-assistant drop, merge), index
+- [x] `memory/history.py`: save, window (limit, leading-assistant drop, merge), index
 - [ ] `core/agent.py` + `core/tools.py`: the loop and an empty registry
 - [ ] `channels/telegram.py`: polling, allowlist, typing indicator, HTML + split
 - [ ] System prompt: who Shelly is, who the operator is, reply style for a phone
