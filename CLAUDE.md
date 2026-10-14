@@ -239,7 +239,7 @@ Later — candidates, not commitments
 - [ ] Notes: retrieve relevant ones instead of all, once there are hundreds
 - [ ] First real capabilities (to be chosen) as modules in `capabilities/`
 - [x] Commands: `/reset` (start a fresh window), `/status`
-- [ ] Dashboard: conversation view and usage in `../Shelly-Web-App`
+- [x] Dashboard: conversation view and usage in `../Shelly-Web-App` (live at sulcata.ai)
 - [x] Usage/cost logging per turn (`response.usage`)
 - [ ] Approval prompts in Telegram before tools with side effects run
 - [x] Rotate `logs/shelly.log` (it is appended to forever)
