@@ -205,6 +205,31 @@ class Tools(AgentCase):
         self.assertEqual(self.stored(), [('user', 'go')])
 
 
+class Reset(AgentCase):
+
+    def test_after_reset_claude_sees_only_new_messages(self):
+        agent = self.make(response(text('first')), response(text('second')))
+
+        async def go():
+            await agent.reply(1, 'old topic')
+            await agent.reset(1)
+            await agent.reply(1, 'new topic')
+
+        run(go())
+
+        self.assertEqual(self.claude.requests[1]['messages'], [{'role': 'user', 'content': 'new topic'}])
+
+    def test_a_reset_during_a_turn_lands_after_it(self):
+        agent = self.make(response(text('answer')))
+
+        async def go():
+            await asyncio.gather(agent.reply(1, 'q'), agent.reset(1))
+
+        run(go())
+
+        self.assertEqual([d['role'] for d in self.history.docs], ['user', 'assistant', 'reset'])
+
+
 class RegistryRules(unittest.TestCase):
 
     def test_duplicate_names_are_refused(self):

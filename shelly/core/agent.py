@@ -80,6 +80,12 @@ class Agent:
 
             return answer
 
+    async def reset(self, chat_id):
+        ''' clear the chat's window; waits for a turn in progress so the marker lands after it '''
+
+        async with self._locks[chat_id]:
+            await self.history.mark_reset(chat_id)
+
     async def _record(self, turn):
         ''' log the turn's cost and keep it; a ledger failure never costs the reply '''
 

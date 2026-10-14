@@ -12,6 +12,7 @@ from shelly.core.tools import Registry
 from shelly.core.usage import COLLECTION as TURNS, Ledger
 from shelly.memory import history
 from shelly.memory.notes import Notes
+from shelly.status import Status
 
 
 log = logging.getLogger('shelly')
@@ -51,7 +52,9 @@ def main():
 
         prompt = Prompt(load_profile(cfg.profile_path), cfg.timezone)
 
-        return core.Agent(claude, store, registry, cfg.model, cfg.effort, prompt, ledger), stop
+        agent = core.Agent(claude, store, registry, cfg.model, cfg.effort, prompt, ledger)
+
+        return agent, Status(agent, notes, ledger, cfg.timezone), stop
 
     telegram.run(cfg, start)
 

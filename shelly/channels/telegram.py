@@ -9,7 +9,7 @@ loop they are first used in, and run_polling() owns that loop.
 import asyncio
 import logging
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.constants import ChatAction, MessageLimit, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
@@ -24,6 +24,15 @@ log = logging.getLogger(__name__)
 TYPING_EVERY = 4
 
 GREETING = "Hi, I'm Shelly. Just message me."
+RESET_DONE = ('Fresh start. The recent conversation is out of view now, though still on record, '
+              'and your saved notes are untouched.')
+UNKNOWN_COMMAND = 'I only know /status and /reset.'
+
+# Shown in Telegram's command menu.
+COMMANDS = [
+    BotCommand('status', 'Uptime, notes and spend'),
+    BotCommand('reset', 'Start the conversation afresh (notes are kept)'),
+]
 TEXT_ONLY = 'I can only read text messages for now.'
 BROKEN = 'Something went wrong on my side. Try again in a moment.'
 
@@ -31,9 +40,10 @@ BROKEN = 'Something went wrong on my side. Try again in a moment.'
 class Channel:
     ''' the handlers, bound to an agent and an allowlist '''
 
-    def __init__(self, agent, allowed_chat_ids):
+    def __init__(self, agent, allowed_chat_ids, status=None):
         self.agent = agent
         self.allowed = allowed_chat_ids
+        self.status = status
 
     def allows(self, update):
         ''' true for an allowed chat; anything else is logged and never answered
@@ -56,6 +66,20 @@ class Channel:
     async def on_start(self, update, context):
         if self.allows(update):
             await send(context.bot, update.effective_chat.id, GREETING)
+
+    async def on_reset(self, update, context):
+        if self.allows(update):
+            await self.agent.reset(update.effective_chat.id)
+            await send(context.bot, update.effective_chat.id, RESET_DONE)
+
+    async def on_status(self, update, context):
+        if self.allows(update):
+            chat_id = update.effective_chat.id
+            await send(context.bot, chat_id, await self.status.report(chat_id))
+
+    async def on_unknown(self, update, context):
+        if self.allows(update):
+            await send(context.bot, update.effective_chat.id, UNKNOWN_COMMAND)
 
     async def on_text(self, update, context):
         if not self.allows(update):
@@ -117,8 +141,8 @@ async def send(bot, chat_id, markdown):
 def run(cfg, start):
     ''' poll Telegram until stopped (Ctrl-C or SIGTERM)
 
-    start() is awaited inside the polling loop and returns (agent, stop), where
-    stop() closes what start() opened. Messages sent while Shelly was down are
+    start() is awaited inside the polling loop and returns (agent, status, stop):
+    the core, the /status reporter, and a stop() that closes what start() opened. Messages sent while Shelly was down are
     still answered when it comes back -- dropping them would lose what was said.
     Updates are handled one at a time, which keeps a chat's turns in order.
     '''
@@ -126,14 +150,18 @@ def run(cfg, start):
     state = {}
 
     async def post_init(app):
-        agent, state['stop'] = await start()
-        channel = Channel(agent, cfg.allowed_chat_ids)
+        agent, status, state['stop'] = await start()
+        channel = Channel(agent, cfg.allowed_chat_ids, status)
 
         app.add_handler(CommandHandler('start', channel.on_start))
+        app.add_handler(CommandHandler('reset', channel.on_reset))
+        app.add_handler(CommandHandler('status', channel.on_status))
+        app.add_handler(MessageHandler(filters.COMMAND, channel.on_unknown))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, channel.on_text))
         app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, channel.on_other))
         app.add_error_handler(on_error)
 
+        await app.bot.set_my_commands(COMMANDS)
         me = await app.bot.get_me()
         log.info('polling as @%s', me.username)
 

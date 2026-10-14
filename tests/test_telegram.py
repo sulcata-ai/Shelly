@@ -39,6 +39,10 @@ class FakeAgent:
     def __init__(self, answer='hello', error=None):
         self.answer, self.error = answer, error
         self.seen = []
+        self.resets = []
+
+    async def reset(self, chat_id):
+        self.resets.append(chat_id)
 
     async def reply(self, chat_id, text):
         self.seen.append((chat_id, text))
@@ -97,6 +101,44 @@ class Allowlist(unittest.TestCase):
             run(self.channel.on_text(update(OPERATOR), self.context))
 
         self.assertEqual(self.bot.sent[0][1], channel_module.BROKEN)
+
+
+class FakeStatus:
+
+    async def report(self, chat_id):
+        return f'**Up** for chat {chat_id}'
+
+
+class Commands(unittest.TestCase):
+
+    def setUp(self):
+        self.agent, self.bot = FakeAgent(), FakeBot()
+        self.channel = Channel(self.agent, frozenset({OPERATOR}), FakeStatus())
+        self.context = SimpleNamespace(bot=self.bot)
+
+    def test_reset_resets_and_says_so(self):
+        run(self.channel.on_reset(update(OPERATOR), self.context))
+
+        self.assertEqual(self.agent.resets, [OPERATOR])
+        self.assertEqual(self.bot.sent[0][1], channel_module.to_html(channel_module.RESET_DONE))
+        self.assertEqual(self.agent.seen, [], 'a command never reaches Claude')
+
+    def test_status_is_sent_formatted(self):
+        run(self.channel.on_status(update(OPERATOR), self.context))
+
+        self.assertEqual(self.bot.sent, [(OPERATOR, f'<b>Up</b> for chat {OPERATOR}', 'HTML')])
+
+    def test_an_unknown_command_names_the_real_ones(self):
+        run(self.channel.on_unknown(update(OPERATOR, '/foo'), self.context))
+
+        self.assertEqual(self.bot.sent[0][1], channel_module.UNKNOWN_COMMAND)
+
+    def test_strangers_get_no_commands_either(self):
+        with self.assertLogs(channel_module.log, level='WARNING'):
+            for handler in (self.channel.on_reset, self.channel.on_status, self.channel.on_unknown):
+                run(handler(update(STRANGER), self.context))
+
+        self.assertEqual((self.agent.resets, self.bot.sent), ([], []))
 
 
 class Send(unittest.TestCase):

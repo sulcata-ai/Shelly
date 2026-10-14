@@ -18,6 +18,10 @@ HISTORY_LIMIT = 20
 
 ROLES = ('user', 'assistant')
 
+# A /reset leaves a marker in the history instead of deleting anything: the window
+# starts after the newest marker, and everything before it is still on record.
+RESET = 'reset'
+
 COLLECTION = 'messages'
 
 
@@ -25,7 +29,9 @@ def build_window(docs):
     ''' turn stored messages, oldest first, into the API's messages list
 
     Two repairs, both needed because the store records what happened rather than
-    what the API accepts:
+    what the API accepts, plus /reset:
+
+    - A reset marker empties the window: only what came after it is shown.
 
     - The window must open on a user message. Cutting at HISTORY_LIMIT can land
       on a reply, so leading assistant messages are dropped.
@@ -38,6 +44,10 @@ def build_window(docs):
 
     for doc in docs:
         role, text = doc.get('role'), doc.get('text')
+
+        if role == RESET:
+            messages = []
+            continue
 
         if role not in ROLES or not text:
             continue
@@ -80,6 +90,16 @@ class History:
             'chat_id': chat_id,
             'role': role,
             'text': text,
+            'created_at': datetime.now(timezone.utc),
+        })
+
+    async def mark_reset(self, chat_id):
+        ''' start the chat's window afresh from here, deleting nothing '''
+
+        await self.collection.insert_one({
+            'chat_id': chat_id,
+            'role': RESET,
+            'text': '',
             'created_at': datetime.now(timezone.utc),
         })
 

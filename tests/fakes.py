@@ -61,6 +61,9 @@ class FakeHistory:
     async def add(self, chat_id, role, text):
         self.docs.append({'chat_id': chat_id, 'role': role, 'text': text})
 
+    async def mark_reset(self, chat_id):
+        self.docs.append({'chat_id': chat_id, 'role': 'reset', 'text': ''})
+
     async def window(self, chat_id):
         return build_window(d for d in self.docs if d['chat_id'] == chat_id)
 

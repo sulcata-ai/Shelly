@@ -44,6 +44,17 @@ class BuildWindow(unittest.TestCase):
 
         self.assertEqual(build_window(docs), [{'role': 'user', 'content': 'hi'}])
 
+    def test_a_reset_empties_the_window_from_that_point(self):
+        docs = [doc('user', 'old'), doc('assistant', 'old reply'), doc('reset', ''),
+                doc('user', 'new')]
+
+        self.assertEqual(build_window(docs), [{'role': 'user', 'content': 'new'}])
+
+    def test_only_the_newest_reset_counts(self):
+        docs = [doc('reset', ''), doc('user', 'a'), doc('reset', ''), doc('user', 'b'), doc('assistant', 'c')]
+
+        self.assertEqual([m['content'] for m in build_window(docs)], ['b', 'c'])
+
     def test_nothing_stored_is_an_empty_window(self):
         self.assertEqual(build_window([]), [])
         self.assertEqual(build_window([doc('assistant', 'orphan')]), [])
@@ -130,6 +141,28 @@ class Store(unittest.TestCase):
         run(go())
 
         self.assertEqual(len(self.collection.docs), 10)
+
+    def test_a_reset_hides_but_keeps_everything(self):
+        async def go():
+            await self.history.add(1, 'user', 'before')
+            await self.history.mark_reset(1)
+            after_reset = await self.history.window(1)
+            await self.history.add(1, 'user', 'after')
+            return after_reset, await self.history.window(1)
+
+        after_reset, later = run(go())
+
+        self.assertEqual(after_reset, [])
+        self.assertEqual(later, [{'role': 'user', 'content': 'after'}])
+        self.assertEqual([d['text'] for d in self.collection.docs if d['role'] == 'user'], ['before', 'after'])
+
+    def test_a_reset_in_one_chat_leaves_others_alone(self):
+        async def go():
+            await self.history.add(2, 'user', 'theirs')
+            await self.history.mark_reset(1)
+            return await self.history.window(2)
+
+        self.assertEqual(run(go()), [{'role': 'user', 'content': 'theirs'}])
 
     def test_a_bad_role_is_refused(self):
         with self.assertRaises(ValueError):

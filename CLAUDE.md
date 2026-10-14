@@ -149,6 +149,16 @@ one fact, at most 500 characters. **Every note is in every prompt** (a context
 block listing `[n] (date) text`), not retrieved; past `LARGE` (300) notes a warning
 is logged — that is the point to switch to retrieval.
 
+**Commands.** Handled in the channel, never sent to Claude or stored as messages,
+and only for allowed chats. `/reset` calls `Agent.reset()`, which (under the chat's
+lock) writes a `role: "reset"` marker to the history; `build_window()` empties the
+window at each marker, so Claude sees only what came after. Nothing is deleted and
+notes are untouched. `/status` is `shelly/status.py`, built in `__main__` with the
+agent, notes and ledger: uptime, model and effort, messages in view, note count,
+and spend today (from local midnight) and over the last 7 days. If the database
+cannot be read it says so instead of failing. Any other command gets "I only know
+/status and /reset". The commands are registered in Telegram's menu at startup.
+
 **Cost.** `core/usage.py`: every turn that reached Claude — failures included —
 is summed over its requests, priced from `PRICES` (USD/MTok: input, output, cache
 write, cache read; thinking is inside output), logged as one `turn …` line, and
@@ -184,7 +194,7 @@ Everything is kept; only the context window is limited.
 
 **Telegram.** `channels/telegram.py` polls (message updates only) and hands text from
 allowed chats to `Agent.reply()`. Strangers are logged and get nothing, not even
-"typing…". `/start` gets a fixed greeting; non-text messages get "text only for
+"typing…". `/start` gets a fixed greeting (see Commands below); non-text messages get "text only for
 now". Updates are handled one at a time. Messages sent while Shelly was down are
 answered on restart. The agent is built in `post_init` by a `start()` coroutine
 from `__main__`, because the async Mongo and Anthropic clients must be created
@@ -215,7 +225,7 @@ Later — candidates, not commitments
 - [x] Long-term memory capability: tools to save and recall durable facts
 - [ ] Notes: retrieve relevant ones instead of all, once there are hundreds
 - [ ] First real capabilities (to be chosen) as modules in `capabilities/`
-- [ ] Commands: `/reset` (start a fresh window), `/status`
+- [x] Commands: `/reset` (start a fresh window), `/status`
 - [ ] Dashboard: conversation view and usage in `../Shelly-Web-App`
 - [x] Usage/cost logging per turn (`response.usage`)
 - [ ] Approval prompts in Telegram before tools with side effects run
