@@ -10,7 +10,7 @@ give Claude tools, without changes to the core. The front end and dashboard live
 `../Shelly-Web-App` (Flask, deployed on Railway at sulcata.ai); Shelly itself runs on
 the Jetson.
 
-Status: **design only, no code yet.** The roadmap at the bottom is the work tracker —
+Status: **scaffold and config done; nothing talks to Telegram or Claude yet.** The roadmap at the bottom is the work tracker —
 keep it current as items land.
 
 ## Decisions
@@ -37,7 +37,7 @@ keep it current as items land.
 | `MONGODB_DB` | optional, default `shelly` |
 | `DASHBOARD_URL` | the web app, for links in replies (not used in v1) |
 
-## Architecture (planned)
+## Architecture
 
 ```
 shelly/
@@ -55,7 +55,10 @@ shelly/
 tests/
 ```
 
-Run with `.venv/bin/python -m shelly`. Tests are plain `unittest`:
+Run with `.venv/bin/python -m shelly`. `shelly/config.py` reads `.env` once at
+startup into a frozen `Config` and raises `ConfigError` listing every problem at
+once; an empty or missing allowlist is an error, never "everyone". `Config`'s repr
+leaves out the secrets, so it is safe to log. Tests are plain `unittest`:
 `.venv/bin/python -m unittest discover -s tests -t . -v`.
 
 **Layering.** The core knows nothing about Telegram, and channels know nothing about
@@ -109,8 +112,8 @@ split at 4096 characters on paragraph boundaries. Show "typing…" while a turn 
 ## Roadmap
 
 v1 — chat over Telegram with short-term memory
-- [ ] Repo scaffold: package layout, `requirements.txt`, `.venv`, `README.md`
-- [ ] `config.py`: load and validate `.env`, fail fast on anything missing
+- [x] Repo scaffold: package layout, `requirements.txt`, `.venv`, `README.md`
+- [x] `config.py`: load and validate `.env`, fail fast on anything missing
 - [ ] `memory/history.py`: save, window (limit, leading-assistant drop, merge), index
 - [ ] `core/agent.py` + `core/tools.py`: the loop and an empty registry
 - [ ] `channels/telegram.py`: polling, allowlist, typing indicator, HTML + split

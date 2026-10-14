@@ -1,0 +1,4 @@
+anthropic>=1.14
+python-telegram-bot>=22.8
+pymongo[srv]>=4.18
+python-dotenv>=1.2
