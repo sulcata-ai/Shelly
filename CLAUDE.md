@@ -179,6 +179,11 @@ covers only the last, so iterations are priced when present. A model missing fro
 there**. It is an estimate: a refusal before any output is counted but may not be
 billed. `Ledger.spent_since()` totals it. A ledger failure is logged, never fatal.
 
+**The dashboard reads these collections.** `../Shelly-Web-App/utils/shelly.py`
+reads `messages`, `notes` and `turns` (never writes) and mirrors `build_window()`
+to show what is in view, with `HISTORY_LIMIT` duplicated. Change a shape or the
+window rules here, follow it there.
+
 **Conversation memory.** Collection `messages`, one document per message:
 `{chat_id, role: "user"|"assistant", text, created_at}`, index
 `(chat_id, created_at desc, _id desc)` — `_id` breaks same-millisecond ties.
