@@ -78,7 +78,7 @@ class Agent:
         request = {
             'model': self.model,
             'max_tokens': MAX_TOKENS,
-            'system': self.prompt.build(),
+            'system': self.prompt.build(await self.registry.context()),
             'output_config': {'effort': self.effort},
             'betas': [FALLBACK_BETA],
             'fallbacks': 'default',

@@ -1,11 +1,13 @@
 ''' the system prompt: who Shelly is, who it works for, and what time it is
 
-Three parts, in this order, as separate system blocks:
+In this order, as separate system blocks:
 
-1. GUIDE -- how Shelly behaves. In the repo, the same for everyone.
-2. The operator's profile -- who they are. Read from a local file that is
-   gitignored, because the repo is public and this is personal.
-3. The current local time -- the one part that changes per turn.
+1. GUIDE -- how Shelly behaves -- and the operator's profile. The profile is read
+   from a local file that is gitignored, because the repo is public and this is
+   personal. Fixed for the life of the process.
+2. Whatever the capabilities contribute this turn (saved notes, say). Changes
+   only when something is saved.
+3. The current local time -- the one part that changes every turn.
 
 Ordered from most to least stable so that, once the prompt is long enough to be
 worth caching, everything before the clock is a fixed prefix. The clock is taken
@@ -76,8 +78,8 @@ class Prompt:
 
         self.stable = stable
 
-    def build(self, now=None):
-        ''' the system blocks for one turn; now is for tests '''
+    def build(self, extra=(), now=None):
+        ''' the system blocks for one turn: extra is capability context; now is for tests '''
 
         now = now or datetime.now(self.timezone)
         clock = (f'Current date and time for the operator: '
@@ -85,5 +87,6 @@ class Prompt:
 
         return [
             {'type': 'text', 'text': self.stable},
+            *({'type': 'text', 'text': text} for text in extra),
             {'type': 'text', 'text': clock},
         ]

@@ -14,13 +14,19 @@ CHICAGO = ZoneInfo('America/Chicago')
 class Build(unittest.TestCase):
 
     def test_guide_then_profile_then_clock(self):
-        blocks = Prompt('Call me M.', CHICAGO).build(datetime(2026, 10, 14, 15, 40, tzinfo=CHICAGO))
+        blocks = Prompt('Call me M.', CHICAGO).build(now=datetime(2026, 10, 14, 15, 40, tzinfo=CHICAGO))
 
         self.assertEqual(len(blocks), 2)
         self.assertTrue(blocks[0]['text'].startswith(GUIDE))
         self.assertTrue(blocks[0]['text'].endswith(f'{PROFILE_HEADER}\nCall me M.'))
         self.assertEqual(blocks[1]['text'], 'Current date and time for the operator: '
                                             'Wednesday 14 October 2026, 15:40 (CDT, America/Chicago).')
+
+    def test_capability_context_sits_between_the_profile_and_the_clock(self):
+        blocks = Prompt('p', CHICAGO).build(['notes here'])
+
+        self.assertEqual([b['text'] for b in blocks][1], 'notes here')
+        self.assertTrue(blocks[2]['text'].startswith('Current date and time'))
 
     def test_no_profile_means_no_header(self):
         self.assertNotIn(PROFILE_HEADER, Prompt(None, CHICAGO).build()[0]['text'])
@@ -31,8 +37,8 @@ class Build(unittest.TestCase):
 
     def test_the_stable_part_does_not_change_between_turns(self):
         prompt = Prompt('p', CHICAGO)
-        first = prompt.build(datetime(2026, 1, 1, 9, tzinfo=CHICAGO))
-        later = prompt.build(datetime(2026, 7, 1, 21, tzinfo=CHICAGO))
+        first = prompt.build(now=datetime(2026, 1, 1, 9, tzinfo=CHICAGO))
+        later = prompt.build(now=datetime(2026, 7, 1, 21, tzinfo=CHICAGO))
 
         self.assertEqual(first[0], later[0])
         self.assertNotEqual(first[1], later[1])

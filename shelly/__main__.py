@@ -4,11 +4,13 @@ import logging
 import sys
 
 from shelly import config
+from shelly.capabilities import memory
 from shelly.channels import telegram
 from shelly.core import agent as core
 from shelly.core.prompt import Prompt, load_profile
 from shelly.core.tools import Registry
 from shelly.memory import history
+from shelly.memory.notes import Notes
 
 
 log = logging.getLogger('shelly')
@@ -32,8 +34,12 @@ def main():
         await store.ensure_indexes()
         claude = core.client(cfg)
 
-        # Capabilities register their tools here as they are built.
+        notes = Notes(mongo[cfg.mongodb_db])
+        await notes.ensure_indexes()
+
+        # Capabilities register their tools and prompt context here.
         registry = Registry()
+        memory.register(registry, notes)
 
         async def stop():
             await claude.close()

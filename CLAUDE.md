@@ -87,7 +87,8 @@ Run with `.venv/bin/python -m shelly` (logs to stderr; `logs/` is gitignored for
 redirected output). `shelly/config.py` reads `.env` once at
 startup into a frozen `Config` and raises `ConfigError` listing every problem at
 once; an empty or missing allowlist is an error, never "everyone". `Config`'s repr
-leaves out the secrets, so it is safe to log. Tests are plain `unittest`:
+leaves out the secrets, so it is safe to log. The Atlas user cannot drop databases, only collections: a throwaway live check
+should use its own collections and drop them. Tests are plain `unittest`:
 `.venv/bin/python -m unittest discover -s tests -t . -v`.
 
 **Layering.** The core knows nothing about Telegram, and channels know nothing about
@@ -95,9 +96,12 @@ Claude: a channel hands the core `(chat_id, text)` and gets text back. A second
 channel (the web dashboard, say) plugs into the same core. Capabilities only add
 tools; they never edit the loop.
 
-**Capabilities.** A capability is a module in `capabilities/` that exports a list of
-`Tool`s. The registry collects them at startup and the agent passes them all to
-Claude. Adding a capability = adding a module + listing it in config. Tool handlers
+**Capabilities.** A capability is a module in `capabilities/` with a
+`register(registry, ...)` function, called from `__main__`'s `start()`. It can add
+`Tool`s (`registry.add`) and prompt context (`registry.add_context(provider)`: an
+async callable returning text, or None, for a system block every turn — for what
+Claude should always know rather than ask for). A provider that raises is logged
+and left out of that turn, never fatal. Tool handlers
 are async, take the validated input, and return a string (or raise; the loop turns an
 exception into a `tool_result` with `is_error: true` rather than crashing the turn).
 Define tools with `strict: true` and a full JSON schema.
@@ -134,6 +138,16 @@ an action no tool performed, say "I don't know"), then the operator profile read
 once at startup from `profile.md`, then — in its own block — the current local
 time in `SHELLY_TIMEZONE`. The clock is read once per turn, so all tool rounds of a
 turn send the identical system. Edit `profile.md`, then restart the service.
+
+**Long-term memory** (`capabilities/memory.py`, store `memory/notes.py`). Notes
+Shelly chooses to keep, separate from the history: collection `notes`
+`{n, text, created_at, updated_at}`, unique index on `n`. Numbers come from an
+atomic `$inc` on `counters._id="notes"` (not max+1 — one turn can save two at
+once) and are never reused. Tools: `remember(text)`, `update_memory(n, text)`,
+`forget(n)`; when and what to save is in the `remember` description. A note is
+one fact, at most 500 characters. **Every note is in every prompt** (a context
+block listing `[n] (date) text`), not retrieved; past `LARGE` (300) notes a warning
+is logged — that is the point to switch to retrieval.
 
 **Conversation memory.** Collection `messages`, one document per message:
 `{chat_id, role: "user"|"assistant", text, created_at}`, index
@@ -182,11 +196,12 @@ v1 — chat over Telegram with short-term memory
 - [x] `channels/telegram.py`: polling, allowlist, typing indicator, HTML + split
 - [x] System prompt: who Shelly is, who the operator is, reply style for a phone
 - [x] Write `profile.md` with the operator (local only)
-- [ ] Tests: allowlist, window rules, tool loop with a fake client, formatting
+- [x] Tests: allowlist, window rules, tool loop with a fake client, formatting
 - [x] Run on the Jetson and survive a reboot (systemd service)
 
 Later — candidates, not commitments
-- [ ] Long-term memory capability: tools to save and recall durable facts
+- [x] Long-term memory capability: tools to save and recall durable facts
+- [ ] Notes: retrieve relevant ones instead of all, once there are hundreds
 - [ ] First real capabilities (to be chosen) as modules in `capabilities/`
 - [ ] Commands: `/reset` (start a fresh window), `/status`
 - [ ] Dashboard: conversation view and usage in `../Shelly-Web-App`

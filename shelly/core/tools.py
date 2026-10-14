@@ -1,4 +1,4 @@
-''' what a capability gives Claude: tools, and the registry that collects them '''
+''' what a capability gives Claude: tools, prompt context, and the registry that collects them '''
 
 import json
 import logging
@@ -49,6 +49,7 @@ class Registry:
 
     def __init__(self):
         self._tools = {}
+        self._contexts = []
 
     def add(self, *tools):
         for tool in tools:
@@ -56,6 +57,37 @@ class Registry:
                 raise ValueError(f'two tools are named {tool.name!r}')
 
             self._tools[tool.name] = tool
+
+    def add_context(self, provider):
+        ''' an async callable returning text for the system prompt each turn, or None
+
+        For what Claude should always know rather than have to ask for -- saved
+        notes, say. Called once per turn, in registration order.
+        '''
+
+        self._contexts.append(provider)
+
+    async def context(self):
+        ''' every provider's text for this turn; a failing provider is left out, not fatal
+
+        A turn without the notes is worse but still useful; a turn that fails
+        because the notes could not be read is neither.
+        '''
+
+        texts = []
+
+        for provider in self._contexts:
+            try:
+                text = await provider()
+            except Exception:
+                log.exception('context provider %s failed; leaving it out this turn',
+                              getattr(provider, '__qualname__', provider))
+                continue
+
+            if text:
+                texts.append(text)
+
+        return texts
 
     def __len__(self):
         return len(self._tools)
