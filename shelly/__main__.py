@@ -9,6 +9,7 @@ from shelly.channels import telegram
 from shelly.core import agent as core
 from shelly.core.prompt import Prompt, load_profile
 from shelly.core.tools import Registry
+from shelly.core.usage import COLLECTION as TURNS, Ledger
 from shelly.memory import history
 from shelly.memory.notes import Notes
 
@@ -34,8 +35,11 @@ def main():
         await store.ensure_indexes()
         claude = core.client(cfg)
 
-        notes = Notes(mongo[cfg.mongodb_db])
+        db = mongo[cfg.mongodb_db]
+        notes = Notes(db)
         await notes.ensure_indexes()
+        ledger = Ledger(db[TURNS])
+        await ledger.ensure_indexes()
 
         # Capabilities register their tools and prompt context here.
         registry = Registry()
@@ -47,7 +51,7 @@ def main():
 
         prompt = Prompt(load_profile(cfg.profile_path), cfg.timezone)
 
-        return core.Agent(claude, store, registry, cfg.model, cfg.effort, prompt), stop
+        return core.Agent(claude, store, registry, cfg.model, cfg.effort, prompt, ledger), stop
 
     telegram.run(cfg, start)
 

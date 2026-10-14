@@ -18,9 +18,16 @@ def tool_use(name, tool_input, id='tu_1'):
     return SimpleNamespace(type='tool_use', id=id, name=name, input=tool_input)
 
 
-def response(*content, stop='end_turn', category=None):
+def usage(input_tokens=100, output_tokens=10, cache_read=0, cache_write=0, iterations=None, model=None):
+    return SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens,
+                           cache_read_input_tokens=cache_read, cache_creation_input_tokens=cache_write,
+                           iterations=iterations, model=model)
+
+
+def response(*content, stop='end_turn', category=None, model='claude-opus-5-5', use=None):
     details = SimpleNamespace(category=category) if stop == 'refusal' else None
-    return SimpleNamespace(content=list(content), stop_reason=stop, stop_details=details)
+    return SimpleNamespace(content=list(content), stop_reason=stop, stop_details=details,
+                           model=model, usage=use or usage())
 
 
 class FakeClaude:

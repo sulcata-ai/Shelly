@@ -149,6 +149,18 @@ one fact, at most 500 characters. **Every note is in every prompt** (a context
 block listing `[n] (date) text`), not retrieved; past `LARGE` (300) notes a warning
 is logged — that is the point to switch to retrieval.
 
+**Cost.** `core/usage.py`: every turn that reached Claude — failures included —
+is summed over its requests, priced from `PRICES` (USD/MTok: input, output, cache
+write, cache read; thinking is inside output), logged as one `turn …` line, and
+kept in collection `turns` (`chat_id, created_at, outcome, requests`, the four
+token counts, `cost_usd, models, tools, seconds`). `outcome` is one of `reply`,
+`cut_off`, `refusal`, `empty`, `steps`, `error`. With the refusal fallback,
+`usage.iterations` lists each attempt with its model and the top-level usage
+covers only the last, so iterations are priced when present. A model missing from
+`PRICES` makes the turn's cost `None` with a warning, never $0 — **add new models
+there**. It is an estimate: a refusal before any output is counted but may not be
+billed. `Ledger.spent_since()` totals it. A ledger failure is logged, never fatal.
+
 **Conversation memory.** Collection `messages`, one document per message:
 `{chat_id, role: "user"|"assistant", text, created_at}`, index
 `(chat_id, created_at desc, _id desc)` — `_id` breaks same-millisecond ties.
@@ -205,6 +217,6 @@ Later — candidates, not commitments
 - [ ] First real capabilities (to be chosen) as modules in `capabilities/`
 - [ ] Commands: `/reset` (start a fresh window), `/status`
 - [ ] Dashboard: conversation view and usage in `../Shelly-Web-App`
-- [ ] Usage/cost logging per turn (`response.usage`)
+- [x] Usage/cost logging per turn (`response.usage`)
 - [ ] Approval prompts in Telegram before tools with side effects run
 - [ ] Rotate `logs/shelly.log` (it is appended to forever)

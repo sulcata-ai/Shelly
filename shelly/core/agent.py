@@ -12,6 +12,7 @@ from collections import defaultdict
 import anthropic
 
 from shelly.core.prompt import Prompt
+from shelly.core.usage import TurnUsage
 
 
 log = logging.getLogger(__name__)
@@ -36,13 +37,14 @@ CUT_OFF_NOTE = '\n\n(cut off -- that reply ran past my length limit)'
 class Agent:
     ''' the core: knows Claude, the history and the tools, and nothing about channels '''
 
-    def __init__(self, client, history, registry, model, effort, prompt=None):
+    def __init__(self, client, history, registry, model, effort, prompt=None, ledger=None):
         self.client = client
         self.history = history
         self.registry = registry
         self.model = model
         self.effort = effort
         self.prompt = prompt or Prompt()
+        self.ledger = ledger
         self._locks = defaultdict(asyncio.Lock)
 
     async def reply(self, chat_id, text):
@@ -53,26 +55,50 @@ class Agent:
         reply only when it is a real one. A failure, refusal or give-up is sent
         but not stored, so the next turn's window joins the unanswered message
         with the next one instead of teaching Claude its own error messages.
+
+        Every turn that reached Claude is costed and recorded, failures included:
+        a failed turn can still have paid for the requests before it failed.
         '''
 
         async with self._locks[chat_id]:
             await self.history.add(chat_id, 'user', text)
             messages = await self.history.window(chat_id)
+            turn = TurnUsage(chat_id)
 
             try:
-                answer, keep = await self._run(messages)
+                answer, keep = await self._run(messages, turn)
             except anthropic.APIError as error:
                 # The SDK has already retried what is worth retrying.
                 log.error('claude request failed: %s', error)
-                return ERROR_REPLY
+                turn.outcome = 'error'
+                answer, keep = ERROR_REPLY, False
 
             if keep:
                 await self.history.add(chat_id, 'assistant', answer)
 
+            await self._record(turn)
+
             return answer
 
-    async def _run(self, messages):
-        ''' the request/tool loop; returns (reply text, worth storing) '''
+    async def _record(self, turn):
+        ''' log the turn's cost and keep it; a ledger failure never costs the reply '''
+
+        doc = turn.document()
+        cost = 'unknown' if doc['cost_usd'] is None else f'${doc["cost_usd"]:.4f}'
+        log.info('turn %s: %s, %d request(s), in=%d out=%d cache_read=%d, %s, %.1fs',
+                 doc['chat_id'], doc['outcome'], doc['requests'], doc['input_tokens'],
+                 doc['output_tokens'], doc['cache_read_input_tokens'], cost, doc['seconds'])
+
+        if self.ledger is None:
+            return
+
+        try:
+            await self.ledger.record(doc)
+        except Exception:
+            log.exception('could not record turn usage')
+
+    async def _run(self, messages, turn):
+        ''' the request/tool loop; returns (reply text, worth storing) and fills in turn '''
 
         messages = list(messages)
         request = {
@@ -89,12 +115,14 @@ class Agent:
 
         for _ in range(MAX_STEPS):
             response = await self.client.beta.messages.create(messages=messages, **request)
+            turn.add(response)
             stop = response.stop_reason
 
             if stop == 'refusal':
                 # Only reached when the fallback model declined too.
                 details = getattr(response, 'stop_details', None)
                 log.warning('refused: %s', getattr(details, 'category', None))
+                turn.outcome = 'refusal'
                 return REFUSAL_REPLY, False
 
             if stop in ('tool_use', 'pause_turn'):
@@ -103,6 +131,7 @@ class Agent:
                 messages.append({'role': 'assistant', 'content': response.content})
 
                 if stop == 'tool_use':
+                    turn.called([b.name for b in response.content if b.type == 'tool_use'])
                     messages.append({'role': 'user', 'content': await self._call_tools(response.content)})
 
                 continue
@@ -111,14 +140,18 @@ class Agent:
 
             if not text:
                 log.warning('empty reply, stop_reason=%s', stop)
+                turn.outcome = 'empty'
                 return ERROR_REPLY, False
 
             if stop == 'max_tokens':
+                turn.outcome = 'cut_off'
                 return text + CUT_OFF_NOTE, True
 
+            turn.outcome = 'reply'
             return text, True
 
         log.warning('gave up after %d tool rounds', MAX_STEPS)
+        turn.outcome = 'steps'
         return STEPS_REPLY, False
 
     async def _call_tools(self, content):
