@@ -10,7 +10,8 @@ give Claude tools, without changes to the core. The front end and dashboard live
 `../Shelly-Web-App` (Flask, deployed on Railway at sulcata.ai); Shelly itself runs on
 the Jetson.
 
-Status: **scaffold, config and history store done; nothing talks to Telegram or Claude yet.** The roadmap at the bottom is the work tracker —
+Status: **scaffold, config, history store and core loop done (all tested with fakes);
+not yet connected to Telegram, and no live Claude call has been made.** The roadmap at the bottom is the work tracker —
 keep it current as items land.
 
 ## Decisions
@@ -79,7 +80,18 @@ Define tools with `strict: true` and a full JSON schema.
 results in one user message. Within a turn, append the assistant's full `content`
 (thinking blocks included) back unchanged; never rebuild it from text. Check
 `stop_reason` before reading content: `refusal` and `max_tokens` get a plain apology
-reply, not a crash. Cap tool iterations per turn.
+reply, not a crash. Cap tool iterations per turn (`MAX_STEPS`, 10).
+
+`Agent.reply(chat_id, text)` is the core's whole interface: it records the user
+message, builds the window, runs the loop and returns text to send — always text,
+never an exception. Only a real reply is stored; an API error, a refusal (after
+the fallback also declined), an empty reply or a loop cut off at `MAX_STEPS` is sent
+as a canned message but not stored, so the next window joins the unanswered message
+with the next one. A reply cut off at `max_tokens` is stored with a note saying so.
+`Registry.run()` never raises: an unknown tool or a handler exception becomes an
+`is_error` result Claude can see. Tools keep registration order so the tools
+block stays byte-identical between requests. `tests/fakes.py` has the scripted
+`FakeClaude` and `FakeHistory` the core tests run on.
 
 Model notes for `claude-opus-5-5`: thinking is always on and cannot be disabled —
 `effort` is the only dial (default would be `medium`; set it explicitly from `.env`);
@@ -119,9 +131,10 @@ v1 — chat over Telegram with short-term memory
 - [x] Repo scaffold: package layout, `requirements.txt`, `.venv`, `README.md`
 - [x] `config.py`: load and validate `.env`, fail fast on anything missing
 - [x] `memory/history.py`: save, window (limit, leading-assistant drop, merge), index
-- [ ] `core/agent.py` + `core/tools.py`: the loop and an empty registry
+- [x] `core/agent.py` + `core/tools.py`: the loop and an empty registry
 - [ ] `channels/telegram.py`: polling, allowlist, typing indicator, HTML + split
 - [ ] System prompt: who Shelly is, who the operator is, reply style for a phone
+  (a short placeholder is in `core/prompt.py`)
 - [ ] Tests: allowlist, window rules, tool loop with a fake client, formatting
 - [ ] Run on the Jetson and survive a reboot (systemd service)
 
