@@ -57,6 +57,13 @@ class Load(unittest.TestCase):
         with self.assertRaises(config.ConfigError):
             config.load(env(ANTHROPIC_EFFORT='extreme'))
 
+    def test_timezone_defaults_to_chicago_and_is_checked(self):
+        self.assertEqual(str(config.load(env()).timezone), 'America/Chicago')
+        self.assertEqual(str(config.load(env(SHELLY_TIMEZONE='Europe/Paris')).timezone), 'Europe/Paris')
+
+        with self.assertRaises(config.ConfigError):
+            config.load(env(SHELLY_TIMEZONE='Mars/Olympus'))
+
     def test_secrets_stay_out_of_the_repr(self):
         text = repr(config.load(env()))
 

@@ -6,6 +6,7 @@ import sys
 from shelly import config
 from shelly.channels import telegram
 from shelly.core import agent as core
+from shelly.core.prompt import Prompt, load_profile
 from shelly.core.tools import Registry
 from shelly.memory import history
 
@@ -38,7 +39,9 @@ def main():
             await claude.close()
             await mongo.close()
 
-        return core.Agent(claude, store, registry, cfg.model, cfg.effort), stop
+        prompt = Prompt(load_profile(cfg.profile_path), cfg.timezone)
+
+        return core.Agent(claude, store, registry, cfg.model, cfg.effort, prompt), stop
 
     telegram.run(cfg, start)
 

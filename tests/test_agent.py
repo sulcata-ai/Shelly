@@ -66,6 +66,17 @@ class PlainChat(AgentCase):
         self.assertIn(agent_module.FALLBACK_BETA, request['betas'])
         self.assertNotIn('tools', request)
         self.assertNotIn('thinking', request, 'thinking cannot be configured off on this model; leave it out')
+        self.assertTrue(request['system'][1]['text'].startswith('Current date and time'))
+
+    def test_the_clock_is_read_once_per_turn(self):
+        agent = self.make(
+            response(tool_use('echo', {'value': 'x'}), stop='tool_use'),
+            response(text('done')),
+            tools=[echo_tool()],
+        )
+        run(agent.reply(1, 'go'))
+
+        self.assertIs(self.claude.requests[0]['system'], self.claude.requests[1]['system'])
 
     def test_earlier_turns_are_in_the_window(self):
         agent = self.make(response(text('first')), response(text('second')))

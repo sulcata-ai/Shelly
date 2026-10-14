@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
@@ -23,11 +24,14 @@ class Config:
     mongodb_uri: str
     mongodb_db: str
     dashboard_url: str | None
+    timezone: ZoneInfo
+    profile_path: str
 
     def __repr__(self):
         # Never the secrets: this ends up in logs and tracebacks.
         return (f'Config(model={self.model!r}, effort={self.effort!r}, '
-                f'mongodb_db={self.mongodb_db!r}, allowed_chats={len(self.allowed_chat_ids)})')
+                f'mongodb_db={self.mongodb_db!r}, timezone={str(self.timezone)!r}, '
+                f'allowed_chats={len(self.allowed_chat_ids)})')
 
 
 def _chat_ids(raw):
@@ -91,6 +95,16 @@ def load(env=None):
     if effort not in EFFORTS:
         problems.append(f'ANTHROPIC_EFFORT must be one of {", ".join(EFFORTS)}')
 
+    # The operator's own zone, not the Jetson's: replies say "tonight" and
+    # "tomorrow" from where the operator is.
+    timezone = None
+    zone = (env.get('SHELLY_TIMEZONE') or 'America/Chicago').strip()
+
+    try:
+        timezone = ZoneInfo(zone)
+    except (ZoneInfoNotFoundError, ValueError):
+        problems.append(f'SHELLY_TIMEZONE {zone!r} is not an IANA time zone')
+
     if problems:
         raise ConfigError('; '.join(problems))
 
@@ -103,4 +117,6 @@ def load(env=None):
         mongodb_uri=mongodb_uri,
         mongodb_db=(env.get('MONGODB_DB') or 'shelly').strip(),
         dashboard_url=(env.get('DASHBOARD_URL') or '').strip() or None,
+        timezone=timezone,
+        profile_path=(env.get('SHELLY_PROFILE') or 'profile.md').strip(),
     )

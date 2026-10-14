@@ -219,3 +219,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 logs/
+
+# the operator profile is personal; the repo is public
+profile.md

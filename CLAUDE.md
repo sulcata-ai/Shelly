@@ -58,6 +58,12 @@ takes ~5s on the Jetson, most of it imports.
 | `MONGODB_URI` | Atlas cluster |
 | `MONGODB_DB` | optional, default `shelly` |
 | `DASHBOARD_URL` | the web app, for links in replies (not used in v1) |
+| `SHELLY_TIMEZONE` | the operator's IANA zone for the clock in the prompt; default `America/Chicago` |
+| `SHELLY_PROFILE` | path to the operator profile; default `profile.md` |
+
+**The repo is public.** Nothing personal goes in it: the operator profile lives in
+`profile.md` (gitignored; `profile.example.md` is the template), and the allowed
+chat id only in `.env`.
 
 ## Architecture
 
@@ -68,7 +74,7 @@ shelly/
   core/
     agent.py         # one turn: history -> Claude -> tool loop -> reply text
     tools.py         # Tool (name, description, input schema, handler) and the registry
-    prompt.py        # the system prompt
+    prompt.py        # the system prompt: guide + operator profile + clock
   memory/
     history.py       # the Mongo conversation store and the context window
   channels/
@@ -122,6 +128,13 @@ server-side refusal fallback (`fallbacks: "default"` with beta
 `server-side-fallback-2026-07-01`) so a refusal is retried on another model rather
 than becoming a dead message.
 
+**System prompt.** `core/prompt.py` sends three parts as two system blocks, most
+stable first: `GUIDE` (behaviour: texting style, no headings/tables, never claim
+an action no tool performed, say "I don't know"), then the operator profile read
+once at startup from `profile.md`, then — in its own block — the current local
+time in `SHELLY_TIMEZONE`. The clock is read once per turn, so all tool rounds of a
+turn send the identical system. Edit `profile.md`, then restart the service.
+
 **Conversation memory.** Collection `messages`, one document per message:
 `{chat_id, role: "user"|"assistant", text, created_at}`, index
 `(chat_id, created_at desc, _id desc)` — `_id` breaks same-millisecond ties.
@@ -167,8 +180,8 @@ v1 — chat over Telegram with short-term memory
 - [x] `memory/history.py`: save, window (limit, leading-assistant drop, merge), index
 - [x] `core/agent.py` + `core/tools.py`: the loop and an empty registry
 - [x] `channels/telegram.py`: polling, allowlist, typing indicator, HTML + split
-- [ ] System prompt: who Shelly is, who the operator is, reply style for a phone
-  (a short placeholder is in `core/prompt.py`)
+- [x] System prompt: who Shelly is, who the operator is, reply style for a phone
+- [ ] Write `profile.md` with the operator
 - [ ] Tests: allowlist, window rules, tool loop with a fake client, formatting
 - [x] Run on the Jetson and survive a reboot (systemd service)
 

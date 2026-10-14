@@ -11,7 +11,7 @@ from collections import defaultdict
 
 import anthropic
 
-from shelly.core.prompt import SYSTEM
+from shelly.core.prompt import Prompt
 
 
 log = logging.getLogger(__name__)
@@ -36,13 +36,13 @@ CUT_OFF_NOTE = '\n\n(cut off -- that reply ran past my length limit)'
 class Agent:
     ''' the core: knows Claude, the history and the tools, and nothing about channels '''
 
-    def __init__(self, client, history, registry, model, effort, system=SYSTEM):
+    def __init__(self, client, history, registry, model, effort, prompt=None):
         self.client = client
         self.history = history
         self.registry = registry
         self.model = model
         self.effort = effort
-        self.system = system
+        self.prompt = prompt or Prompt()
         self._locks = defaultdict(asyncio.Lock)
 
     async def reply(self, chat_id, text):
@@ -78,7 +78,7 @@ class Agent:
         request = {
             'model': self.model,
             'max_tokens': MAX_TOKENS,
-            'system': self.system,
+            'system': self.prompt.build(),
             'output_config': {'effort': self.effort},
             'betas': [FALLBACK_BETA],
             'fallbacks': 'default',
