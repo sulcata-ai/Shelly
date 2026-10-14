@@ -11,7 +11,7 @@ give Claude tools, without changes to the core. The front end and dashboard live
 the Jetson.
 
 Status: **scaffold, config, history store and core loop done (all tested with fakes);
-not yet connected to Telegram, and no live Claude call has been made.** The roadmap at the bottom is the work tracker —
+verified live against the API on 2026-10-14; not yet connected to Telegram.** The roadmap at the bottom is the work tracker —
 keep it current as items land.
 
 ## Decisions
