@@ -54,7 +54,7 @@ def main():
             await claude.close()
             await mongo.close()
 
-        prompt = Prompt(load_profile(cfg.profile_path), cfg.timezone)
+        prompt = Prompt(load_profile(cfg.profile_path))
 
         agent = core.Agent(claude, store, registry, cfg.model, cfg.effort, prompt, ledger)
 

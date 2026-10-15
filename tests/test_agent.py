@@ -67,7 +67,7 @@ class PlainChat(AgentCase):
         self.assertNotIn('tools', request)
         self.assertNotIn('thinking', request, 'thinking cannot be configured off on this model; leave it out')
         self.assertEqual(request['cache_control'], {'type': 'ephemeral'})
-        self.assertTrue(request['system'][1]['text'].startswith('Current date and time'))
+        self.assertEqual(len(request['system']), 1)
 
     def test_the_clock_is_read_once_per_turn(self):
         agent = self.make(

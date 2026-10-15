@@ -4,6 +4,13 @@ Every message is kept; only the window is limited. What is stored is the final
 text of each side -- never thinking blocks, tool calls or tool results -- so a
 replayed earlier turn is plain text, and sliding the window forward never edits
 anything the model holds to the letter.
+
+Each operator message in the window opens with the local time it was received,
+taken from its stored created_at. That is how Claude knows the time -- the
+newest stamp is now -- and how long ago things were said. Being derived from
+the store, the stamps are byte-identical every time a message is replayed, so
+the conversation stays a stable prefix for the prompt cache; a clock in the
+system prompt would change every turn and invalidate everything after it.
 '''
 
 from datetime import datetime, timezone
@@ -25,8 +32,19 @@ RESET = 'reset'
 COLLECTION = 'messages'
 
 
-def build_window(docs):
+def stamp(moment, tz):
+    ''' the time prefix on an operator message: [Thu 15 Oct 2026, 10:32 CDT] '''
+
+    local = moment.astimezone(tz)
+
+    return f'[{local:%a %d %b %Y, %H:%M} {local.tzname()}]'
+
+
+def build_window(docs, tz=timezone.utc):
     ''' turn stored messages, oldest first, into the API's messages list
+
+    Operator messages are stamped with their local time (see the module
+    docstring); Shelly's are not, so it is not prompted to write stamps itself.
 
     Two repairs, both needed because the store records what happened rather than
     what the API accepts, plus /reset:
@@ -55,6 +73,9 @@ def build_window(docs):
         if not messages and role == 'assistant':
             continue
 
+        if role == 'user' and doc.get('created_at'):
+            text = f'{stamp(doc["created_at"], tz)}\n{text}'
+
         if messages and messages[-1]['role'] == role:
             messages[-1]['content'] += '\n\n' + text
         else:
@@ -70,9 +91,10 @@ class History:
     serializes turns per chat, so history order is the order things happened.
     '''
 
-    def __init__(self, collection, limit=HISTORY_LIMIT):
+    def __init__(self, collection, limit=HISTORY_LIMIT, tz=timezone.utc):
         self.collection = collection
         self.limit = limit
+        self.tz = tz
 
     async def ensure_indexes(self):
         ''' the one index the window query needs; cheap to repeat at startup '''
@@ -111,12 +133,12 @@ class History:
         and a user message and a fast failure reply can share one.
         '''
 
-        cursor = (self.collection.find({'chat_id': chat_id}, {'role': 1, 'text': 1})
+        cursor = (self.collection.find({'chat_id': chat_id}, {'role': 1, 'text': 1, 'created_at': 1})
                   .sort([('created_at', DESCENDING), ('_id', DESCENDING)])
                   .limit(self.limit))
         docs = await cursor.to_list()
 
-        return build_window(reversed(docs))
+        return build_window(reversed(docs), self.tz)
 
 
 def connect(cfg):
@@ -124,4 +146,4 @@ def connect(cfg):
 
     client = AsyncMongoClient(cfg.mongodb_uri, tz_aware=True)
 
-    return client, History(client[cfg.mongodb_db][COLLECTION])
+    return client, History(client[cfg.mongodb_db][COLLECTION], tz=cfg.timezone)

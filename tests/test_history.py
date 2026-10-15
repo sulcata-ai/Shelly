@@ -2,13 +2,20 @@
 
 The store keeps what happened; the window has to be what the API accepts. The
 traps are a window cut on a reply, a failed turn leaving two user messages in a
-row, ties in time, and one chat's messages leaking into another's.
+row, ties in time, one chat's messages leaking into another's, and a time stamp
+that renders differently on replay (which would break the prompt cache).
 '''
 
 import asyncio
+import re
 import unittest
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from shelly.memory.history import History, build_window
+
+CHICAGO = ZoneInfo('America/Chicago')
+STAMP = re.compile(r'^\[[^\]]+\]\n', re.M)
 
 
 def doc(role, text):
@@ -16,6 +23,18 @@ def doc(role, text):
 
 
 class BuildWindow(unittest.TestCase):
+
+    def test_each_joined_operator_message_keeps_its_own_stamp(self):
+        at = datetime(2026, 1, 5, 18, 0, tzinfo=timezone.utc)
+        docs = [dict(doc('user', 'one'), created_at=at), dict(doc('user', 'two'), created_at=at + timedelta(days=1))]
+
+        self.assertEqual(build_window(docs, CHICAGO)[0]['content'],
+                         '[Mon 05 Jan 2026, 12:00 CST]\none\n\n[Tue 06 Jan 2026, 12:00 CST]\ntwo')
+
+    def test_the_same_stored_messages_always_render_the_same(self):
+        docs = [dict(doc('user', 'hi'), created_at=datetime(2026, 1, 5, 18, 0, tzinfo=timezone.utc))]
+
+        self.assertEqual(build_window(docs, CHICAGO), build_window(docs, CHICAGO))
 
     def test_an_ordinary_exchange_passes_through(self):
         docs = [doc('user', 'hi'), doc('assistant', 'hello'), doc('user', 'how are you?')]
@@ -106,12 +125,29 @@ class Store(unittest.TestCase):
         self.collection = FakeCollection()
         self.history = History(self.collection, limit=4)
 
+    async def window(self, chat_id):
+        ''' the window with the time stamps taken off, for tests about which messages are in it '''
+
+        return [dict(m, content=STAMP.sub('', m['content'])) for m in await self.history.window(chat_id)]
+
+    def test_operator_messages_are_stamped_in_local_time(self):
+        history = History(self.collection, tz=CHICAGO)
+
+        async def go():
+            await history.add(1, 'user', 'q')
+            await history.add(1, 'assistant', 'a')
+            self.collection.docs[0]['created_at'] = datetime(2026, 10, 15, 15, 32, tzinfo=timezone.utc)
+            return await history.window(1)
+
+        self.assertEqual(run(go()), [{'role': 'user', 'content': '[Thu 15 Oct 2026, 10:32 CDT]\nq'},
+                                     {'role': 'assistant', 'content': 'a'}])
+
     def test_messages_come_back_oldest_first_and_limited(self):
         async def go():
             for i in range(3):
                 await self.history.add(1, 'user', f'q{i}')
                 await self.history.add(1, 'assistant', f'a{i}')
-            return await self.history.window(1)
+            return await self.window(1)
 
         self.assertEqual([m['content'] for m in run(go())], ['q1', 'a1', 'q2', 'a2'])
 
@@ -121,7 +157,7 @@ class Store(unittest.TestCase):
             await self.history.add(1, 'assistant', 'a')
             for d in self.collection.docs:
                 d['created_at'] = self.collection.docs[0]['created_at']
-            return await self.history.window(1)
+            return await self.window(1)
 
         self.assertEqual([m['role'] for m in run(go())], ['user', 'assistant'])
 
@@ -129,7 +165,7 @@ class Store(unittest.TestCase):
         async def go():
             await self.history.add(1, 'user', 'mine')
             await self.history.add(2, 'user', 'theirs')
-            return await self.history.window(1)
+            return await self.window(1)
 
         self.assertEqual(run(go()), [{'role': 'user', 'content': 'mine'}])
 
@@ -146,9 +182,9 @@ class Store(unittest.TestCase):
         async def go():
             await self.history.add(1, 'user', 'before')
             await self.history.mark_reset(1)
-            after_reset = await self.history.window(1)
+            after_reset = await self.window(1)
             await self.history.add(1, 'user', 'after')
-            return after_reset, await self.history.window(1)
+            return after_reset, await self.window(1)
 
         after_reset, later = run(go())
 
@@ -160,7 +196,7 @@ class Store(unittest.TestCase):
         async def go():
             await self.history.add(2, 'user', 'theirs')
             await self.history.mark_reset(1)
-            return await self.history.window(2)
+            return await self.window(2)
 
         self.assertEqual(run(go()), [{'role': 'user', 'content': 'theirs'}])
 

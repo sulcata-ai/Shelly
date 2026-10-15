@@ -1,23 +1,20 @@
-''' the system prompt: who Shelly is, who it works for, and what time it is
+''' the system prompt: who Shelly is and who it works for
 
 In this order, as separate system blocks:
 
 1. GUIDE -- how Shelly behaves -- and the operator's profile. The profile is read
    from a local file that is gitignored, because the repo is public and this is
-   personal. Fixed for the life of the process.
-2. Whatever the capabilities contribute this turn (saved notes, say). Changes
-   only when something is saved.
-3. The current local time -- the one part that changes every turn.
+   personal. Fixed for the life of the process, and a prompt-cache breakpoint.
+2. Whatever the capabilities contribute this turn (saved notes, open tasks).
+   Changes only when something is saved.
 
-Ordered from most to least stable so that, once the prompt is long enough to be
-worth caching, everything before the clock is a fixed prefix. The clock is taken
-once per turn, not per request, so the tool rounds inside one turn agree on it.
+Ordered from most to least stable for the prompt cache. There is no clock here:
+the time is stamped on each operator message instead (memory/history.py), so
+nothing in the system prompt changes from one turn to the next on its own.
 '''
 
 import logging
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 
 log = logging.getLogger(__name__)
@@ -44,8 +41,10 @@ Memory:
 - You see only the recent part of the conversation, roughly the last ten messages from each \
 side. Older messages are kept but not shown to you. If the operator refers to something \
 you cannot see, say you do not have it in view and ask, rather than inventing it.
-- Earlier messages in view may be hours or days old; the current time is given below, but \
-the earlier messages carry no timestamps.'''
+- Each operator message begins with the local date and time it was sent, in brackets, \
+like [Thu 15 Oct 2026, 10:32 CDT]. The newest one is the current time; use the others to \
+tell how long ago things were said. The stamps are added by the system: never write them \
+in your replies. Your own earlier messages carry no stamps.'''
 
 PROFILE_HEADER = 'About the operator (written by them):'
 
@@ -73,8 +72,7 @@ CACHE = {'type': 'ephemeral'}
 class Prompt:
     ''' builds the system parameter for each turn '''
 
-    def __init__(self, profile=None, timezone=None, guide=GUIDE):
-        self.timezone = timezone or ZoneInfo('UTC')
+    def __init__(self, profile=None, guide=GUIDE):
         stable = guide
 
         if profile:
@@ -82,18 +80,14 @@ class Prompt:
 
         self.stable = stable
 
-    def build(self, extra=(), now=None):
-        ''' the system blocks for one turn: extra is capability context; now is for tests '''
+    def build(self, extra=()):
+        ''' the system blocks for one turn: extra is capability context
 
-        now = now or datetime.now(self.timezone)
-        clock = (f'Current date and time for the operator: '
-                 f'{now:%A %-d %B %Y, %H:%M} ({now.tzname()}, {self.timezone}).')
+        The cache point sits on the stable block: tools render before system, so
+        it covers tools + guide + profile, which are byte-identical every turn.
+        '''
 
-        # The cache point sits on the stable block: tools render before system, so
-        # it covers tools + guide + profile, which are byte-identical every turn.
-        # The capability context and the clock change per turn and come after it.
         return [
             {'type': 'text', 'text': self.stable, 'cache_control': CACHE},
             *({'type': 'text', 'text': text} for text in extra),
-            {'type': 'text', 'text': clock},
         ]

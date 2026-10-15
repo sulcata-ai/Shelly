@@ -66,7 +66,7 @@ takes ~5s on the Jetson, most of it imports.
 | `MONGODB_URI` | Atlas cluster |
 | `MONGODB_DB` | optional, default `shelly` |
 | `DASHBOARD_URL` | the web app, for links in replies (not used in v1) |
-| `SHELLY_TIMEZONE` | the operator's IANA zone for the clock in the prompt; default `America/Chicago` |
+| `SHELLY_TIMEZONE` | the operator's IANA zone, for message time stamps and task times; default `America/Chicago` |
 | `SHELLY_PROFILE` | path to the operator profile; default `profile.md` |
 
 **The repo is public.** Nothing personal goes in it: the operator profile lives in
@@ -82,7 +82,7 @@ shelly/
   core/
     agent.py         # one turn: history -> Claude -> tool loop -> reply text
     tools.py         # Tool (name, description, input schema, handler) and the registry
-    prompt.py        # the system prompt: guide + operator profile + clock
+    prompt.py        # the system prompt: guide + operator profile + capability context
     context.py       # current_chat: the chat the running turn belongs to
   memory/
     history.py       # the Mongo conversation store and the context window
@@ -149,20 +149,28 @@ server-side refusal fallback (`fallbacks: "default"` with beta
 `server-side-fallback-2026-07-01`) so a refusal is retried on another model rather
 than becoming a dead message.
 
-**System prompt.** `core/prompt.py` sends three parts as two system blocks, most
-stable first: `GUIDE` (behaviour: texting style, no headings/tables, never claim
-an action no tool performed, say "I don't know"), then the operator profile read
-once at startup from `profile.md`, then — in its own block — the current local
-time in `SHELLY_TIMEZONE`. The clock is read once per turn, so all tool rounds of a
-turn send the identical system. Edit `profile.md`, then restart the service.
+**System prompt.** `core/prompt.py` sends, most stable first: `GUIDE` (behaviour:
+texting style, no headings/tables, never claim an action no tool performed, say
+"I don't know") and the operator profile read once at startup from `profile.md`,
+as one block; then one block per capability context (notes, open tasks). Edit
+`profile.md`, then restart the service. **There is no clock in the system
+prompt**: every operator message in the window opens with the local time it was
+received, `[Thu 15 Oct 2026, 10:32 CDT]`, rendered from its stored `created_at`
+in `SHELLY_TIMEZONE` (`history.stamp()`). The newest stamp is now; the others
+tell Claude how long ago things were said. Shelly's own messages are not stamped,
+so it does not learn to write stamps. Stamps exist only in the window, never in
+the stored text.
 
 **Prompt caching.** Two breakpoints (5-minute TTL): an explicit one on the stable
 system block (tools render before system, so it covers tools + guide + profile and
 is read back across turns), and top-level automatic `cache_control` on the request,
-so each tool round of a turn reads back the round before. Capability context and
-the clock sit after the stable block and change every turn — keep anything that
-varies out of the guide, profile and tool definitions, or every turn rewrites the
-cache. The `turn …` log line shows `cache_read` and `cache_write`.
+so each tool round of a turn reads back the round before, and each turn reads
+back the conversation so far. That works because nothing before the newest
+message changes on its own: the time stamps are derived from the store, so a
+replayed message is byte-identical. Capability context sits between the stable
+block and the conversation, so a turn that changes a note or task makes the next
+turn re-write the conversation (the stable block still reads). Keep anything that
+varies per turn out of the system prompt and tool definitions. The `turn …` log line shows `cache_read` and `cache_write`.
 
 **Long-term memory** (`capabilities/memory.py`, store `memory/notes.py`). Notes
 Shelly chooses to keep, separate from the history: collection `notes`
