@@ -3,14 +3,18 @@
 import logging
 import os
 import sys
+from pathlib import Path
+
+import httpx
 
 from shelly import config, logs
-from shelly.capabilities import memory, todo
+from shelly.capabilities import calendar, memory, todo
 from shelly.channels import telegram
 from shelly.core import agent as core
 from shelly.core.prompt import Prompt, load_profile
 from shelly.core.tools import Registry
 from shelly.core.usage import COLLECTION as TURNS, Ledger
+from shelly.integrations.google import GoogleAuth, GoogleCalendar
 from shelly.memory import history
 from shelly.memory.notes import Notes
 from shelly.memory.tasks import Tasks
@@ -50,9 +54,22 @@ def main():
         memory.register(registry, notes)
         todo.register(registry, tasks)
 
+        google = None
+
+        if Path(cfg.google_token_path).exists():
+            google = httpx.AsyncClient(timeout=20)
+            calendar.register(registry, GoogleCalendar(GoogleAuth(cfg.google_token_path, google)), cfg.timezone)
+            log.info('google calendar on')
+        else:
+            log.info('google calendar off: no login saved at %s (python -m shelly.google_login)',
+                     cfg.google_token_path)
+
         async def stop():
             await claude.close()
             await mongo.close()
+
+            if google is not None:
+                await google.aclose()
 
         prompt = Prompt(load_profile(cfg.profile_path))
 

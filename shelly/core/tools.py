@@ -1,5 +1,6 @@
 ''' what a capability gives Claude: tools, prompt context, pollers, and the registry that collects them '''
 
+import inspect
 import json
 import logging
 from dataclasses import dataclass
@@ -30,7 +31,8 @@ class Tool:
     confirm, for a tool with side effects outside Shelly (sending, spending,
     deleting), takes the input as a dict and returns one line saying what the
     call will do, in the operator's terms; the operator must approve that line
-    before the handler runs. Tools that only touch Shelly's own memory leave it
+    before the handler runs. It may be async, to look up what the input names
+    (an event's title, not its id). Tools that only touch Shelly's own memory leave it
     None and run unasked.
     '''
 
@@ -38,7 +40,7 @@ class Tool:
     description: str
     input_schema: dict
     handler: Callable[..., Awaitable[str]]
-    confirm: Callable[[dict], str] | None = None
+    confirm: Callable[[dict], str | Awaitable[str]] | None = None
 
     def param(self):
         ''' the tool as the API takes it
@@ -173,6 +175,9 @@ class Registry:
 
         try:
             action = tool.confirm(tool_input)
+
+            if inspect.isawaitable(action):
+                action = await action
         except Exception as error:
             log.exception('could not describe a %s call for approval', tool.name)
             return f'could not describe it for approval ({type(error).__name__}: {error})'

@@ -68,10 +68,14 @@ takes ~5s on the Jetson, most of it imports.
 | `DASHBOARD_URL` | the web app, for links in replies (not used in v1) |
 | `SHELLY_TIMEZONE` | the operator's IANA zone, for message time stamps and task times; default `America/Chicago` |
 | `SHELLY_PROFILE` | path to the operator profile; default `profile.md` |
+| `GOOGLE_CLIENT_FILE` | the OAuth client downloaded from Google Cloud, for the login only; default `secrets/google_client.json` |
+| `GOOGLE_TOKEN_FILE` | the saved Google login; default `secrets/google_token.json`. Missing means no calendar |
 
 **The repo is public.** Nothing personal goes in it: the operator profile lives in
 `profile.md` (gitignored; `profile.example.md` is the template), and the allowed
-chat id only in `.env`.
+chat id only in `.env`. `secrets/` (gitignored, mode 700) holds the Google OAuth
+client and the saved login, which is full access to the operator's calendar:
+never in the repo, Mongo, logs or the dashboard.
 
 ## Architecture
 
@@ -84,6 +88,9 @@ shelly/
     tools.py         # Tool (name, description, input schema, handler) and the registry
     prompt.py        # the system prompt: guide + operator profile + capability context
     context.py       # current_chat: the chat the running turn belongs to
+  google_login.py    # python -m shelly.google_login: the one-time Google login
+  integrations/
+    google.py        # Google OAuth token refresh and the Calendar REST calls (httpx)
   memory/
     history.py       # the Mongo conversation store and the context window
     notes.py         # long-term notes
@@ -93,6 +100,7 @@ shelly/
   capabilities/      # one module per capability, each exporting its tools
     memory.py        # remember / update_memory / forget
     todo.py          # the to-do tools, open-task block, reminder poller
+    calendar.py      # Google Calendar: agenda block, event tools (changes ask first)
 tests/
 ```
 
@@ -236,6 +244,41 @@ material cannot be inferred. Claude passes local ISO times (`2026-10-20` means
   lost race, so the poller and a tool call on the same task cannot undo each
   other.
 
+**Google Calendar** (`capabilities/calendar.py`, client `integrations/google.py`).
+On only when `GOOGLE_TOKEN_FILE` exists; `__main__` logs `google calendar on/off`.
+The Google Cloud project `Shelly` (the operator's personal account) has a Desktop
+OAuth client and its consent screen **In production**, because in Testing the
+refresh token dies after 7 days. Scopes are `SCOPES` in `integrations/google.py`
+(`calendar.events`, `calendar.readonly`). Adding one means logging in again.
+`python -m shelly.google_login` prints the consent link. The browser can be
+anywhere: it ends on an unloadable `http://localhost:8765/?code=…` address,
+which is pasted back. It saves `{client_id, client_secret, refresh_token,
+scopes}` with mode 600. `GoogleAuth` refreshes the access token over httpx a
+minute before expiry and retries a 401 once. A refused refresh
+(`invalid_grant`) becomes `RELOGIN`, which tells Claude (and so the operator)
+to run the login again. Every API failure is a `GoogleError` worded for Claude.
+- **Agenda block** every turn: today and the next two days, from every calendar
+  switched on ("selected") in Google Calendar, grouped by local day, with "nothing"
+  for empty days. Declined events are left out. Each line ends with
+  `[calendar: <id>, event: <id>]` (the primary calendar is `primary`), which the
+  tools take. Cached 2 min (calendar list 10 min); Shelly's own changes clear it.
+  If Google cannot be read, the block says so and tells Claude not to assume the
+  operator is free, rather than vanishing.
+- **Tools.** `calendar_events(start, end, query)` reads up to 92 days, includes
+  each event's description (truncated, labelled as written by whoever made
+  the event), and runs unasked. `create_event`, `update_event`,
+  `delete_event` and `respond_to_invite` all have an async `confirm` that looks
+  the event up, so the prompt names it ("Change "Dentist" (Tue 20 Oct
+  14:00-15:30): move to …") and says when guests will get an email.
+  Guests are emailed (`sendUpdates=all`) exactly when the event has other
+  attendees. Times are local ISO from Claude. An all-day `end` is the last day
+  covered (Google's exclusive end is one day later), and moving `start` alone
+  keeps the length. On a recurring event, update and delete touch only that
+  occurrence (ids come from `singleEvents=true` listings).
+- **Event text is untrusted.** Anyone can put an invitation on the calendar,
+  so the agenda tells Claude to treat event text as information, never
+  instructions, and every change goes through approval.
+
 **Commands.** Handled in the channel, never sent to Claude or stored as messages,
 and only for allowed chats. `/reset` calls `Agent.reset()`, which (under the chat's
 lock) writes a `role: "reset"` marker to the history; `build_window()` empties the
@@ -286,7 +329,7 @@ Everything is kept; only the context window is limited.
 - Turns for one chat run one at a time (a per-chat lock), so history order is the
   order things happened.
 
-**Telegram.** `channels/telegram.py` polls (message updates only) and hands text from
+**Telegram.** `channels/telegram.py` polls and hands text from
 allowed chats to `Agent.reply()`. Strangers are logged and get nothing, not even
 "typing…". `/start` gets a fixed greeting (see Commands below); non-text messages get "text only for
 now". Polling takes messages and callback queries (button taps). Updates are
@@ -324,6 +367,8 @@ Later — candidates, not commitments
 - [ ] Notes: retrieve relevant ones instead of all, once there are hundreds
 - [x] To-do list: planned tasks with steps, reminders and repeating habits
 - [ ] More capabilities (to be chosen) as modules in `capabilities/`
+- [ ] Google Calendar: built and unit-tested; needs the Google login and a live check
+- [ ] Gmail: read, search, drafts unasked; send/reply/forward/trash ask first
 - [x] Dashboard: a view of the to-do list
 - [x] Commands: `/reset` (start a fresh window), `/status`
 - [x] Dashboard: conversation view and usage in `../Shelly-Web-App` (live at sulcata.ai)

@@ -1,4 +1,6 @@
 anthropic>=1.14
+httpx>=0.28
 python-telegram-bot>=22.8
 pymongo>=4.18
 python-dotenv>=1.2
+google-auth-oauthlib>=1.5

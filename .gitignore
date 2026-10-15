@@ -222,3 +222,6 @@ logs/
 
 # the operator profile is personal; the repo is public
 profile.md
+
+# Google OAuth client and token: full access to the operator's account
+secrets/
