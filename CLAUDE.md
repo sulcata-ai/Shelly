@@ -239,10 +239,11 @@ there**. It is an estimate: a refusal before any output is counted but may not b
 billed. `Ledger.spent_since()` totals it. A ledger failure is logged, never fatal.
 
 **The dashboard reads these collections.** `../Shelly-Web-App/utils/shelly.py`
-reads `messages`, `notes` and `turns` (never writes; reminders show up in
-`messages` as assistant messages, and `tasks` is not shown yet) and mirrors `build_window()`
-to show what is in view, with `HISTORY_LIMIT` duplicated. Change a shape or the
-window rules here, follow it there.
+reads `messages`, `notes`, `turns` and `tasks` (never writes; reminders show up
+in `messages` as assistant messages). It mirrors `build_window()` to show what is
+in view, with `HISTORY_LIMIT` duplicated, and `current_occurrence()` to show a
+repeating task's due date. Change a shape, the window rules or the repeat rules
+here, follow it there.
 
 **Conversation memory.** Collection `messages`, one document per message:
 `{chat_id, role: "user"|"assistant", text, created_at}`, index
@@ -299,7 +300,7 @@ Later — candidates, not commitments
 - [ ] Notes: retrieve relevant ones instead of all, once there are hundreds
 - [x] To-do list: planned tasks with steps, reminders and repeating habits
 - [ ] More capabilities (to be chosen) as modules in `capabilities/`
-- [ ] Dashboard: a view of the to-do list
+- [x] Dashboard: a view of the to-do list
 - [x] Commands: `/reset` (start a fresh window), `/status`
 - [x] Dashboard: conversation view and usage in `../Shelly-Web-App` (live at sulcata.ai)
 - [x] Usage/cost logging per turn (`response.usage`)
