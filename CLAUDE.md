@@ -123,6 +123,26 @@ are async, take the validated input, and return a string (or raise; the loop tur
 exception into a `tool_result` with `is_error: true` rather than crashing the turn).
 Define tools with `strict: true` and a full JSON schema.
 
+**Approval before side effects.** A tool that acts outside Shelly (sends,
+spends, deletes, runs something) sets `Tool.confirm`: a function from its input
+to one line saying what the call will do, in the operator's terms. Before the
+handler runs, `Registry.run()` hands that line and `current_chat` to
+`registry.approver`, and runs the handler only on a yes. Anything else
+(declined, no answer, no approver set, the approver or `confirm` raising)
+becomes an `is_error` result telling Claude it was not done and not to retry
+unasked. It fails closed. The description of such a tool gets `ASKS_FIRST`
+appended, so Claude calls it rather than asking in chat and then being asked
+again. Tools that only touch Shelly's own memory (notes, tasks) have no
+`confirm` and run unasked. In Telegram the approver is `Approvals`: a plain-text
+message "Okay to do this?" with ✅ Do it / ❌ Don't buttons (callback data
+`approve:<random id>:yes|no`). The turn waits for a tap, holding the chat's
+lock, for up to `APPROVAL_TIMEOUT` (10 min); no tap counts as a no. A new
+message or `/reset` from the chat settles any waiting prompt as a no, so the
+chat is never stuck behind it. "typing…" pauses while a prompt waits. A tap from
+another chat, or on a prompt from before a restart, settles nothing and gets
+"That request has expired." The prompt is edited afterwards to say how it ended,
+and each ask and outcome is logged (`approval <id> …`).
+
 **The agent loop.** A manual loop over `client.messages.create` (or `.stream` +
 `get_final_message()` once replies get long) using `AsyncAnthropic`: send, and while
 `stop_reason == "tool_use"` run every `tool_use` block — concurrently — and return all
@@ -269,8 +289,12 @@ Everything is kept; only the context window is limited.
 **Telegram.** `channels/telegram.py` polls (message updates only) and hands text from
 allowed chats to `Agent.reply()`. Strangers are logged and get nothing, not even
 "typing…". `/start` gets a fixed greeting (see Commands below); non-text messages get "text only for
-now". Updates are handled one at a time. Messages sent while Shelly was down are
-answered on restart. The agent is built in `post_init` by a `start()` coroutine
+now". Polling takes messages and callback queries (button taps). Updates are
+handled **concurrently** (`concurrent_updates(True)`): a turn waiting on an
+approval tap must not block the tap itself. A chat's turns still run in arrival
+order, because each update's task starts in order and the agent's per-chat
+`asyncio.Lock` is first come, first served. Messages sent while Shelly was down
+are answered on restart. The agent is built in `post_init` by a `start()` coroutine
 from `__main__`, because the async Mongo and Anthropic clients must be created
 inside the loop `run_polling()` owns.
 
@@ -304,5 +328,5 @@ Later — candidates, not commitments
 - [x] Commands: `/reset` (start a fresh window), `/status`
 - [x] Dashboard: conversation view and usage in `../Shelly-Web-App` (live at sulcata.ai)
 - [x] Usage/cost logging per turn (`response.usage`)
-- [ ] Approval prompts in Telegram before tools with side effects run
+- [x] Approval prompts in Telegram before tools with side effects run
 - [x] Rotate `logs/shelly.log` (it is appended to forever)

@@ -5,8 +5,18 @@ import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
+from shelly.core.context import current_chat
+
 
 log = logging.getLogger(__name__)
+
+# Appended to the description of a tool that asks first, so Claude calls it
+# rather than asking for permission in chat and then being asked again by the button.
+ASKS_FIRST = (' (Before this runs, the operator is shown what it will do and taps approve or '
+              'decline. Call it directly; do not ask for permission in chat first.)')
+
+NOT_DONE = ('Not done: {why}. Nothing was changed. Tell the operator it was not done, and do '
+            'not try it again unless they ask.')
 
 
 @dataclass(frozen=True)
@@ -16,12 +26,19 @@ class Tool:
     handler is async, takes the tool's input as keyword arguments and returns
     the text Claude reads back. Raising is fine: the registry turns it into an
     error result Claude can see and work around, rather than a failed turn.
+
+    confirm, for a tool with side effects outside Shelly (sending, spending,
+    deleting), takes the input as a dict and returns one line saying what the
+    call will do, in the operator's terms; the operator must approve that line
+    before the handler runs. Tools that only touch Shelly's own memory leave it
+    None and run unasked.
     '''
 
     name: str
     description: str
     input_schema: dict
     handler: Callable[..., Awaitable[str]]
+    confirm: Callable[[dict], str] | None = None
 
     def param(self):
         ''' the tool as the API takes it
@@ -33,7 +50,7 @@ class Tool:
 
         return {
             'name': self.name,
-            'description': self.description,
+            'description': self.description + (ASKS_FIRST if self.confirm else ''),
             'input_schema': self.input_schema,
             'strict': True,
         }
@@ -51,6 +68,10 @@ class Registry:
         self._tools = {}
         self._contexts = []
         self._pollers = []
+        # async (chat_id, action) -> (approved, why), set by the channel, which
+        # is the one that can put a question in front of the operator. Until it
+        # is set, a tool that asks first does not run.
+        self.approver = None
 
     def add(self, *tools):
         for tool in tools:
@@ -127,6 +148,12 @@ class Registry:
         if tool is None:
             return f'There is no tool named {name!r}.', True
 
+        if tool.confirm is not None:
+            why = await self._refusal(tool, tool_input)
+
+            if why is not None:
+                return NOT_DONE.format(why=why), True
+
         try:
             result = await tool.handler(**tool_input)
         except Exception as error:  # a broken tool must not take the turn down with it
@@ -137,3 +164,27 @@ class Registry:
             result = json.dumps(result, default=str)
 
         return result, False
+
+    async def _refusal(self, tool, tool_input):
+        ''' None if the operator approved this call, else why it must not run
+
+        Fails closed: no way to ask, or asking failing, is a no.
+        '''
+
+        try:
+            action = tool.confirm(tool_input)
+        except Exception as error:
+            log.exception('could not describe a %s call for approval', tool.name)
+            return f'could not describe it for approval ({type(error).__name__}: {error})'
+
+        if self.approver is None:
+            log.warning('%s needs approval and there is no one to ask', tool.name)
+            return 'there is no way to ask the operator for approval here'
+
+        try:
+            approved, why = await self.approver(current_chat.get(), action)
+        except Exception:
+            log.exception('asking for approval of %s failed', tool.name)
+            return 'asking the operator for approval failed'
+
+        return None if approved else why
