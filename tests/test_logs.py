@@ -37,6 +37,13 @@ class Rotation(unittest.TestCase):
             self.assertTrue(all(p.stat().st_size <= 2000 for p in path.parent.iterdir()))
             self.assertIn('line 199', path.read_text())
 
+    def test_per_request_http_lines_are_quiet_but_warnings_get_through(self):
+        logs.configure(None)
+
+        for name in ('httpx', 'httpx2'):
+            self.assertFalse(logging.getLogger(name).isEnabledFor(logging.INFO), name)
+            self.assertTrue(logging.getLogger(name).isEnabledFor(logging.WARNING), name)
+
     def test_without_a_path_logs_go_to_stderr(self):
         handler = logs.configure(None)
         self.assertIsInstance(handler, logging.StreamHandler)

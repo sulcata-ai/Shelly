@@ -37,8 +37,10 @@ def configure(path=None, max_bytes=MAX_BYTES, backups=BACKUPS):
     root.handlers[:] = [handler]
     root.setLevel(logging.INFO)
 
-    # httpx logs every Telegram long poll at INFO, which buries everything else.
-    logging.getLogger('httpx').setLevel(logging.WARNING)
+    # Both HTTP clients log every request at INFO, which buries everything else:
+    # httpx under Telegram's long polls, httpx2 under the Anthropic SDK (1.x).
+    for name in ('httpx', 'httpx2'):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
     # An uncaught exception would otherwise print to stderr only, outside the log.
     def log_uncaught(kind, value, traceback):
