@@ -1,6 +1,7 @@
 ''' stand-ins for Claude and the history store, so the core runs with no network '''
 
 import asyncio
+import copy
 from types import SimpleNamespace
 
 from shelly.memory.history import build_window
@@ -77,6 +78,10 @@ class _Cursor:
         self.docs.sort(key=lambda d: d[key], reverse=direction < 0)
         return self
 
+    def limit(self, n):
+        self.docs = self.docs[:n]
+        return self
+
     async def to_list(self):
         return self.docs
 
@@ -98,7 +103,19 @@ class FakeCollection:
         return _Cursor([{k: v for k, v in d.items() if k not in hidden} for d in self._match(query)])
 
     async def insert_one(self, doc):
-        self.docs.append(dict(doc))
+        self.docs.append(copy.deepcopy(doc))
+
+    async def find_one(self, query, projection=None):
+        found = self.find(query, projection).docs
+        return copy.deepcopy(found[0]) if found else None
+
+    async def replace_one(self, query, doc):
+        found = self._match(query)[:1]
+
+        for old in found:
+            self.docs[self.docs.index(old)] = copy.deepcopy(doc)
+
+        return SimpleNamespace(matched_count=len(found))
 
     async def find_one_and_update(self, query, update, upsert=False, return_document=None):
         found = self._match(query)

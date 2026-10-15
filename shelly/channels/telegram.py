@@ -8,6 +8,7 @@ loop they are first used in, and run_polling() owns that loop.
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from telegram import BotCommand, Update
 from telegram.constants import ChatAction, MessageLimit, ParseMode
@@ -22,6 +23,10 @@ log = logging.getLogger(__name__)
 # Telegram shows "typing..." for about five seconds per action, so it is renewed
 # a little more often than that while a turn runs.
 TYPING_EVERY = 4
+
+# How often the capabilities' pollers are asked for anything to send unprompted
+# (reminders). A reminder can be up to this late.
+TICK = 30
 
 GREETING = "Hi, I'm Shelly. Just message me."
 RESET_DONE = ('Fresh start. The recent conversation is out of view now, though still on record, '
@@ -105,6 +110,40 @@ class Channel:
             await send(context.bot, update.effective_chat.id, TEXT_ONLY)
 
 
+async def tick(bot, agent, allowed, every=TICK):
+    ''' send what the capabilities have to say unprompted, forever
+
+    Each message is sent, then recorded in the chat's history so the next turn
+    knows it was said. One that cannot be sent is logged and not recorded; the
+    poller has already let it go, so it is not retried.
+    '''
+
+    while True:
+        await asyncio.sleep(every)
+
+        # Anything escaping here would end the task, and with it every reminder,
+        # silently: an exception in a background task is never seen.
+        try:
+            await tick_once(bot, agent, allowed)
+        except Exception:
+            log.exception('reminder tick failed')
+
+
+async def tick_once(bot, agent, allowed):
+    for chat_id, text in await agent.registry.poll(datetime.now(timezone.utc)):
+        if chat_id not in allowed:
+            log.warning('not sending to chat %s: it is not allowed', chat_id)
+            continue
+
+        try:
+            await send(bot, chat_id, text)
+        except TelegramError:
+            log.exception('could not send an unprompted message to chat %s', chat_id)
+            continue
+
+        await agent.inform(chat_id, text)
+
+
 async def keep_typing(bot, chat_id):
     ''' show "typing..." until cancelled; a failure here is cosmetic, so it is swallowed '''
 
@@ -161,11 +200,16 @@ def run(cfg, start):
         app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, channel.on_other))
         app.add_error_handler(on_error)
 
+        state['ticker'] = asyncio.create_task(tick(app.bot, agent, cfg.allowed_chat_ids))
+
         await app.bot.set_my_commands(COMMANDS)
         me = await app.bot.get_me()
         log.info('polling as @%s', me.username)
 
     async def post_shutdown(app):
+        if 'ticker' in state:
+            state['ticker'].cancel()
+
         if 'stop' in state:
             await state['stop']()
 

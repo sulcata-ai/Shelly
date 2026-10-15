@@ -11,6 +11,7 @@ from collections import defaultdict
 
 import anthropic
 
+from shelly.core.context import current_chat
 from shelly.core.prompt import Prompt
 from shelly.core.usage import TurnUsage
 
@@ -64,6 +65,7 @@ class Agent:
             await self.history.add(chat_id, 'user', text)
             messages = await self.history.window(chat_id)
             turn = TurnUsage(chat_id)
+            current_chat.set(chat_id)
 
             try:
                 answer, keep = await self._run(messages, turn)
@@ -79,6 +81,16 @@ class Agent:
             await self._record(turn)
 
             return answer
+
+    async def inform(self, chat_id, text):
+        ''' record something Shelly said unprompted (a reminder), so later turns see it
+
+        Under the chat's lock, so it lands after any turn in progress rather than
+        between that turn's question and its answer.
+        '''
+
+        async with self._locks[chat_id]:
+            await self.history.add(chat_id, 'assistant', text)
 
     async def reset(self, chat_id):
         ''' clear the chat's window; waits for a turn in progress so the marker lands after it '''

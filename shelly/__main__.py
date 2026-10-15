@@ -5,7 +5,7 @@ import os
 import sys
 
 from shelly import config, logs
-from shelly.capabilities import memory
+from shelly.capabilities import memory, todo
 from shelly.channels import telegram
 from shelly.core import agent as core
 from shelly.core.prompt import Prompt, load_profile
@@ -13,6 +13,7 @@ from shelly.core.tools import Registry
 from shelly.core.usage import COLLECTION as TURNS, Ledger
 from shelly.memory import history
 from shelly.memory.notes import Notes
+from shelly.memory.tasks import Tasks
 from shelly.status import Status
 
 
@@ -41,10 +42,13 @@ def main():
         await notes.ensure_indexes()
         ledger = Ledger(db[TURNS])
         await ledger.ensure_indexes()
+        tasks = Tasks(db, cfg.timezone)
+        await tasks.ensure_indexes()
 
         # Capabilities register their tools and prompt context here.
         registry = Registry()
         memory.register(registry, notes)
+        todo.register(registry, tasks)
 
         async def stop():
             await claude.close()

@@ -1,4 +1,4 @@
-''' what a capability gives Claude: tools, prompt context, and the registry that collects them '''
+''' what a capability gives Claude: tools, prompt context, pollers, and the registry that collects them '''
 
 import json
 import logging
@@ -50,6 +50,7 @@ class Registry:
     def __init__(self):
         self._tools = {}
         self._contexts = []
+        self._pollers = []
 
     def add(self, *tools):
         for tool in tools:
@@ -88,6 +89,29 @@ class Registry:
                 texts.append(text)
 
         return texts
+
+    def add_poller(self, poller):
+        ''' an async callable(now) returning [(chat_id, text)] for Shelly to send unprompted
+
+        For what a capability has to say when nobody asked -- a reminder coming
+        due. The channel calls every poller on a timer. A poller marks what it
+        returns as handled: it is sent once, not again on the next tick.
+        '''
+
+        self._pollers.append(poller)
+
+    async def poll(self, now):
+        ''' every poller's messages now; a failing poller is logged and skipped this tick '''
+
+        messages = []
+
+        for poller in self._pollers:
+            try:
+                messages.extend(await poller(now))
+            except Exception:
+                log.exception('poller %s failed', getattr(poller, '__qualname__', poller))
+
+        return messages
 
     def __len__(self):
         return len(self._tools)

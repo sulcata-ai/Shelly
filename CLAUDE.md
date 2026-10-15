@@ -83,11 +83,16 @@ shelly/
     agent.py         # one turn: history -> Claude -> tool loop -> reply text
     tools.py         # Tool (name, description, input schema, handler) and the registry
     prompt.py        # the system prompt: guide + operator profile + clock
+    context.py       # current_chat: the chat the running turn belongs to
   memory/
     history.py       # the Mongo conversation store and the context window
+    notes.py         # long-term notes
+    tasks.py         # the to-do store: tasks, steps, reminders, repeats
   channels/
-    telegram.py      # Telegram in/out: allowlist, formatting, splitting
+    telegram.py      # Telegram in/out: allowlist, formatting, splitting, reminder tick
   capabilities/      # one module per capability, each exporting its tools
+    memory.py        # remember / update_memory / forget
+    todo.py          # the to-do tools, open-task block, reminder poller
 tests/
 ```
 
@@ -109,7 +114,11 @@ tools; they never edit the loop.
 `Tool`s (`registry.add`) and prompt context (`registry.add_context(provider)`: an
 async callable returning text, or None, for a system block every turn — for what
 Claude should always know rather than ask for). A provider that raises is logged
-and left out of that turn, never fatal. Tool handlers
+and left out of that turn, never fatal. A capability can also add a poller
+(`registry.add_poller(poll)`: an async `poll(now)` returning `[(chat_id, text)]`)
+for what Shelly says unprompted; it marks what it returns as handled. A tool that
+needs to know which chat it runs for reads `core.context.current_chat`, which the
+agent sets for each turn. Tool handlers
 are async, take the validated input, and return a string (or raise; the loop turns an
 exception into a `tool_result` with `is_error: true` rather than crashing the turn).
 Define tools with `strict: true` and a full JSON schema.
@@ -157,6 +166,40 @@ one fact, at most 500 characters. **Every note is in every prompt** (a context
 block listing `[n] (date) text`), not retrieved; past `LARGE` (300) notes a warning
 is logged — that is the point to switch to retrieval.
 
+**To-do list** (`capabilities/todo.py`, store `memory/tasks.py`). Collection
+`tasks`, one document per task: `{n, chat_id, title, details, status, due,
+remind_at, repeat, done_log, steps: [{title, status, due, remind_at, repeat,
+done_at}], created_at, updated_at, done_at, v}`; `n` from `counters._id="tasks"`
+like notes. Status is `open | done | dropped`; times are UTC; `repeat` is
+`none | daily | weekdays | weekly`. Tools: `add_task`, `update_task`, `set_steps`,
+`complete_task`, `list_closed_tasks`. **How Shelly plans lives in the `add_task`
+description**: gather what "done" means, break multi-sitting work into
+one-sitting steps scheduled in turn up to the deadline, set reminders by
+judgment (09:00 local on a step's day by default), ask only when something
+material cannot be inferred. Claude passes local ISO times (`2026-10-20` means
+09:00); a reminder in the past is refused. Every open task is in every prompt.
+
+- **Reminders.** The channel's `tick()` calls the pollers every 30 s
+  (`TICK`); `Tasks.fire_due()` returns every reminder due and moves it on (a
+  repeat to its next occurrence on the local wall clock, so DST does not shift
+  it; missed occurrences are skipped) or clears it (a one-off). The text is a
+  template, not Claude: instant and free. More than 10 min late (Shelly was down)
+  it says so. Each is sent, then recorded in `messages` as an `assistant`
+  message via `Agent.inform()` (under the chat lock) so a reply like "done" makes
+  sense. A send that fails is logged and not retried. A failing tick is logged and
+  the timer carries on.
+- **Repeating tasks are habits.** `complete_task` on one counts an occurrence,
+  not the task: it is appended to `done_log` (last 100), and due and remind_at
+  move to the next occurrence (a reminder not yet fired for it is skipped). Only
+  an occurrence falling today counts — within the coming week for `weekly`;
+  done on another day it is just logged. A due date left behind by missed days
+  is read as its first occurrence from today (`current_occurrence`). It stays
+  open until dropped or set done with `update_task`. The prompt shows its next
+  due and recent completions, which is how Shelly tracks a streak.
+- **Writes** are read-modify-replace guarded by a version `v`, retried on a
+  lost race, so the poller and a tool call on the same task cannot undo each
+  other.
+
 **Commands.** Handled in the channel, never sent to Claude or stored as messages,
 and only for allowed chats. `/reset` calls `Agent.reset()`, which (under the chat's
 lock) writes a `role: "reset"` marker to the history; `build_window()` empties the
@@ -180,7 +223,8 @@ there**. It is an estimate: a refusal before any output is counted but may not b
 billed. `Ledger.spent_since()` totals it. A ledger failure is logged, never fatal.
 
 **The dashboard reads these collections.** `../Shelly-Web-App/utils/shelly.py`
-reads `messages`, `notes` and `turns` (never writes) and mirrors `build_window()`
+reads `messages`, `notes` and `turns` (never writes; reminders show up in
+`messages` as assistant messages, and `tasks` is not shown yet) and mirrors `build_window()`
 to show what is in view, with `HISTORY_LIMIT` duplicated. Change a shape or the
 window rules here, follow it there.
 
@@ -237,7 +281,9 @@ v1 — chat over Telegram with short-term memory
 Later — candidates, not commitments
 - [x] Long-term memory capability: tools to save and recall durable facts
 - [ ] Notes: retrieve relevant ones instead of all, once there are hundreds
-- [ ] First real capabilities (to be chosen) as modules in `capabilities/`
+- [x] To-do list: planned tasks with steps, reminders and repeating habits
+- [ ] More capabilities (to be chosen) as modules in `capabilities/`
+- [ ] Dashboard: a view of the to-do list
 - [x] Commands: `/reset` (start a fresh window), `/status`
 - [x] Dashboard: conversation view and usage in `../Shelly-Web-App` (live at sulcata.ai)
 - [x] Usage/cost logging per turn (`response.usage`)
