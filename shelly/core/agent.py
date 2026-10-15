@@ -12,7 +12,7 @@ from collections import defaultdict
 import anthropic
 
 from shelly.core.context import current_chat
-from shelly.core.prompt import Prompt
+from shelly.core.prompt import CACHE, Prompt
 from shelly.core.usage import TurnUsage
 
 
@@ -103,9 +103,10 @@ class Agent:
 
         doc = turn.document()
         cost = 'unknown' if doc['cost_usd'] is None else f'${doc["cost_usd"]:.4f}'
-        log.info('turn %s: %s, %d request(s), in=%d out=%d cache_read=%d, %s, %.1fs',
+        log.info('turn %s: %s, %d request(s), in=%d out=%d cache_read=%d cache_write=%d, %s, %.1fs',
                  doc['chat_id'], doc['outcome'], doc['requests'], doc['input_tokens'],
-                 doc['output_tokens'], doc['cache_read_input_tokens'], cost, doc['seconds'])
+                 doc['output_tokens'], doc['cache_read_input_tokens'],
+                 doc['cache_creation_input_tokens'], cost, doc['seconds'])
 
         if self.ledger is None:
             return
@@ -126,6 +127,10 @@ class Agent:
             'output_config': {'effort': self.effort},
             'betas': [FALLBACK_BETA],
             'fallbacks': 'default',
+            # Automatic caching on the conversation tail: each tool round of a
+            # turn reads back the round before it. The stable system block has
+            # its own breakpoint (prompt.py), which survives across turns.
+            'cache_control': CACHE,
         }
 
         if len(self.registry):

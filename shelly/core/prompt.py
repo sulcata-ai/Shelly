@@ -66,6 +66,10 @@ def load_profile(path):
     return text or None
 
 
+# A 5-minute prompt-cache breakpoint.
+CACHE = {'type': 'ephemeral'}
+
+
 class Prompt:
     ''' builds the system parameter for each turn '''
 
@@ -85,8 +89,11 @@ class Prompt:
         clock = (f'Current date and time for the operator: '
                  f'{now:%A %-d %B %Y, %H:%M} ({now.tzname()}, {self.timezone}).')
 
+        # The cache point sits on the stable block: tools render before system, so
+        # it covers tools + guide + profile, which are byte-identical every turn.
+        # The capability context and the clock change per turn and come after it.
         return [
-            {'type': 'text', 'text': self.stable},
+            {'type': 'text', 'text': self.stable, 'cache_control': CACHE},
             *({'type': 'text', 'text': text} for text in extra),
             {'type': 'text', 'text': clock},
         ]

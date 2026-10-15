@@ -156,6 +156,14 @@ once at startup from `profile.md`, then — in its own block — the current loc
 time in `SHELLY_TIMEZONE`. The clock is read once per turn, so all tool rounds of a
 turn send the identical system. Edit `profile.md`, then restart the service.
 
+**Prompt caching.** Two breakpoints (5-minute TTL): an explicit one on the stable
+system block (tools render before system, so it covers tools + guide + profile and
+is read back across turns), and top-level automatic `cache_control` on the request,
+so each tool round of a turn reads back the round before. Capability context and
+the clock sit after the stable block and change every turn — keep anything that
+varies out of the guide, profile and tool definitions, or every turn rewrites the
+cache. The `turn …` log line shows `cache_read` and `cache_write`.
+
 **Long-term memory** (`capabilities/memory.py`, store `memory/notes.py`). Notes
 Shelly chooses to keep, separate from the history: collection `notes`
 `{n, text, created_at, updated_at}`, unique index on `n`. Numbers come from an

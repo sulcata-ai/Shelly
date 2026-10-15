@@ -43,6 +43,12 @@ class Build(unittest.TestCase):
         self.assertEqual(first[0], later[0])
         self.assertNotEqual(first[1], later[1])
 
+    def test_only_the_stable_block_is_a_cache_point(self):
+        blocks = Prompt('p', CHICAGO).build(['notes here'])
+
+        self.assertEqual(blocks[0]['cache_control'], {'type': 'ephemeral'})
+        self.assertEqual([b for b in blocks[1:] if 'cache_control' in b], [])
+
     def test_without_a_zone_the_clock_is_utc_not_naive(self):
         self.assertIn('UTC', Prompt().build()[1]['text'])
 
