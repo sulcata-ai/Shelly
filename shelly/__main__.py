@@ -8,13 +8,13 @@ from pathlib import Path
 import httpx
 
 from shelly import config, logs
-from shelly.capabilities import calendar, memory, todo
+from shelly.capabilities import calendar, mail, memory, todo
 from shelly.channels import telegram
 from shelly.core import agent as core
 from shelly.core.prompt import Prompt, load_profile
 from shelly.core.tools import Registry
 from shelly.core.usage import COLLECTION as TURNS, Ledger
-from shelly.integrations.google import GoogleAuth, GoogleCalendar
+from shelly.integrations.google import CALENDAR_SCOPE, GMAIL_SCOPE, GoogleAuth, GoogleCalendar, Gmail
 from shelly.memory import history
 from shelly.memory.notes import Notes
 from shelly.memory.tasks import Tasks
@@ -58,10 +58,20 @@ def main():
 
         if Path(cfg.google_token_path).exists():
             google = httpx.AsyncClient(timeout=20)
-            calendar.register(registry, GoogleCalendar(GoogleAuth(cfg.google_token_path, google)), cfg.timezone)
-            log.info('google calendar on')
+            auth = GoogleAuth(cfg.google_token_path, google)
+
+            # Each is on only if the saved login covers it: a login from before
+            # a capability was added lacks its scope until the operator logs in again.
+            if CALENDAR_SCOPE in auth.scopes:
+                calendar.register(registry, GoogleCalendar(auth), cfg.timezone)
+
+            if GMAIL_SCOPE in auth.scopes:
+                mail.register(registry, Gmail(auth), cfg.timezone)
+
+            log.info('google: calendar %s, gmail %s',
+                     *('on' if scope in auth.scopes else 'off (log in again)' for scope in (CALENDAR_SCOPE, GMAIL_SCOPE)))
         else:
-            log.info('google calendar off: no login saved at %s (python -m shelly.google_login)',
+            log.info('google off: no login saved at %s (python -m shelly.google_login)',
                      cfg.google_token_path)
 
         async def stop():

@@ -21,13 +21,19 @@ log = logging.getLogger(__name__)
 
 TOKEN_URL = 'https://oauth2.googleapis.com/token'
 CALENDAR = 'https://www.googleapis.com/calendar/v3'
+GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me'
 
-# What the login asks for. calendar.events: read and change events;
-# calendar.readonly: list the calendars themselves. Adding a scope here
-# means logging in again.
+CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
+# read, draft, send, label and trash -- but never delete for good
+GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
+
+# What the login asks for. calendar.readonly lists the calendars themselves.
+# Adding a scope here means logging in again; until then, a capability whose
+# scope the saved login lacks stays off (see __main__).
 SCOPES = [
-    'https://www.googleapis.com/auth/calendar.events',
+    CALENDAR_SCOPE,
     'https://www.googleapis.com/auth/calendar.readonly',
+    GMAIL_SCOPE,
 ]
 
 RELOGIN = ('Google access has expired or was revoked. The operator needs to log in again on '
@@ -46,7 +52,7 @@ class GoogleAuth:
         self._client_id = saved['client_id']
         self._client_secret = saved['client_secret']
         self._refresh_token = saved['refresh_token']
-        self.scopes = saved.get('scopes', [])
+        self.scopes = set(saved.get('scopes', []))
         self.http = http
         self._token = None
         self._expires = 0.0
@@ -163,3 +169,47 @@ class GoogleCalendar:
     async def delete(self, calendar_id, event_id, notify):
         await self.auth.request('DELETE', f'{self._events(calendar_id)}/{quote(event_id, safe="")}',
                                 params={'sendUpdates': 'all' if notify else 'none'})
+
+
+class Gmail:
+    ''' the Gmail v1 calls Shelly uses '''
+
+    def __init__(self, auth):
+        self.auth = auth
+
+    async def threads(self, query, limit):
+        body = await self.auth.request('GET', f'{GMAIL}/threads', params={'q': query, 'maxResults': limit})
+
+        return body.get('threads', [])
+
+    async def thread(self, thread_id, full=True):
+        params = {'format': 'full'} if full else {
+            'format': 'metadata', 'metadataHeaders': ['From', 'To', 'Subject', 'Date']}
+
+        return await self.auth.request('GET', f'{GMAIL}/threads/{quote(thread_id, safe="")}', params=params)
+
+    async def message(self, message_id):
+        return await self.auth.request('GET', f'{GMAIL}/messages/{quote(message_id, safe="")}',
+                                       params={'format': 'metadata',
+                                               'metadataHeaders': ['From', 'Subject', 'Message-ID', 'References', 'Reply-To']})
+
+    async def create_draft(self, raw, thread_id=None):
+        message = {'raw': raw}
+
+        if thread_id:
+            message['threadId'] = thread_id
+
+        return await self.auth.request('POST', f'{GMAIL}/drafts', json={'message': message})
+
+    async def draft(self, draft_id):
+        return await self.auth.request('GET', f'{GMAIL}/drafts/{quote(draft_id, safe="")}', params={'format': 'full'})
+
+    async def send_draft(self, draft_id):
+        return await self.auth.request('POST', f'{GMAIL}/drafts/send', json={'id': draft_id})
+
+    async def modify(self, thread_id, add=(), remove=()):
+        return await self.auth.request('POST', f'{GMAIL}/threads/{quote(thread_id, safe="")}/modify',
+                                       json={'addLabelIds': list(add), 'removeLabelIds': list(remove)})
+
+    async def trash(self, thread_id):
+        return await self.auth.request('POST', f'{GMAIL}/threads/{quote(thread_id, safe="")}/trash')
