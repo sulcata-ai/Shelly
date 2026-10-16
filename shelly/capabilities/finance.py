@@ -31,6 +31,7 @@ RETRY_AFTER = timedelta(minutes=30)
 FRESH = timedelta(hours=1)            # sync_finances refuses within this of the last sync
 OVERLAP = timedelta(days=5)
 FIRST_DAYS = MAX_DAYS - 1         # exactly 90 is capped with a warning, as if an error
+CHUNK = timedelta(days=45)        # the Bridge warns past 45 days a request (and may cap)
 TRANSFER_DAYS = 4                     # how far apart the two legs of a transfer can post
 LISTED, MOST_LISTED = 50, 200
 GROUPS = 15
@@ -183,16 +184,32 @@ def register(registry, api, store, tz, chat_id):
     next_try = [None]
 
     async def sync(now):
-        ''' one request to the Bridge, saved; returns (accounts, transactions, new bank errors) '''
+        ''' fetch from the Bridge and save; returns (accounts, transactions, new bank errors)
+
+        One request, or a few CHUNK-long ones oldest first when reaching back
+        further (the first sync), so the last one leaves the newest balances.
+        '''
 
         async with lock:
             state = await store.state()
             last = state.get('synced_at')
             earliest = now - timedelta(days=FIRST_DAYS)
             start = earliest if last is None else max(last - OVERLAP, earliest)
-            account_set = await api.accounts(start=start)
-            accounts, saved = await store.save(account_set, institutions(account_set), start, now)
-            found = [plain(e, 300) for e in errors(account_set)]
+            windows, cursor = [], start
+
+            while now - cursor > CHUNK:
+                windows.append((cursor, cursor + CHUNK))
+                cursor += CHUNK
+
+            windows.append((cursor, None))
+            accounts, saved, found = 0, 0, []
+
+            for begin, end in windows:
+                account_set = await api.accounts(start=begin, end=end)
+                accounts, count = await store.save(account_set, institutions(account_set), begin, now)
+                saved += count
+                found += [e for e in (plain(e, 300) for e in errors(account_set)) if e not in found]
+
             new = [e for e in found if e not in state.get('errors', [])]
             state.update(synced_at=now, errors=found, failure=None,
                          history_from=state.get('history_from') or start)

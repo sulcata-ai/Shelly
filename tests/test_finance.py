@@ -54,7 +54,7 @@ class FakeBridge:
         self.calls = []
 
     async def accounts(self, start=None, end=None, balances_only=False):
-        self.calls.append(start)
+        self.calls.append((start, end))
 
         if self.error:
             raise self.error
@@ -177,11 +177,12 @@ class Sync(unittest.TestCase):
         self.bridge = bridge
         finance.register(self.registry, bridge, self.store, TZ, chat)
 
-    def test_the_first_sync_reaches_back_just_under_ninety_days(self):
+    def test_the_first_sync_reaches_back_just_under_ninety_days_in_45_day_requests(self):
         self.register(FakeBridge({'accounts': []}))
         run(self.registry.poll(NOW))
 
-        self.assertEqual(self.bridge.calls, [NOW - timedelta(days=89)])
+        self.assertEqual(self.bridge.calls, [(NOW - timedelta(days=89), NOW - timedelta(days=44)),
+                                             (NOW - timedelta(days=44), None)])
 
     def test_it_syncs_every_six_hours_with_a_five_day_overlap(self):
         self.register(FakeBridge({'accounts': []}))
@@ -189,11 +190,11 @@ class Sync(unittest.TestCase):
         for minutes in range(0, 6 * 60, 7):
             run(self.registry.poll(NOW + timedelta(minutes=minutes)))
 
-        self.assertEqual(len(self.bridge.calls), 1)
+        self.assertEqual(len(self.bridge.calls), 2)   # the first sync's two chunks
 
         run(self.registry.poll(NOW + timedelta(hours=6)))
 
-        self.assertEqual(self.bridge.calls[1], NOW - timedelta(days=5))
+        self.assertEqual(self.bridge.calls[2], (NOW - timedelta(days=5), None))
 
     def test_a_restart_does_not_sync_again_early(self):
         self.register(FakeBridge({'accounts': []}))
@@ -203,7 +204,7 @@ class Sync(unittest.TestCase):
 
         run(again.poll(NOW + timedelta(hours=1)))
 
-        self.assertEqual(len(self.bridge.calls), 1)
+        self.assertEqual(len(self.bridge.calls), 2)
 
     def test_a_bank_error_is_told_once(self):
         self.register(FakeBridge({'accounts': [], 'errors': ['Chase needs you to sign in again']}))
@@ -231,7 +232,7 @@ class Sync(unittest.TestCase):
         self.register(FakeBridge({'accounts': [], 'errors': ['Re-link']}), chat=None)
 
         self.assertEqual(run(self.registry.poll(NOW)), [])
-        self.assertEqual(len(self.bridge.calls), 1)
+        self.assertEqual(len(self.bridge.calls), 2)
 
 
 class Tools(unittest.TestCase):

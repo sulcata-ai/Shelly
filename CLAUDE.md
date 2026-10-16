@@ -369,7 +369,8 @@ URL that could be logged.
 - **Sync, not live calls.** The Bridge expects ~24 requests a day (more gets the
   token disabled), banks refresh about daily, and one request covers at most 90
   days (exactly 90 comes back capped with a warning, so the first sync asks for
-  `FIRST_DAYS` = 89). A poller syncs every account when the last sync
+  `FIRST_DAYS` = 89) and is warned past 45 ("may be capped in future"), so a
+  longer reach is split into `CHUNK` (45-day) requests, oldest first. A poller syncs every account when the last sync
   (`fin_sync._id="state".synced_at`, so restarts do not resync) is `SYNC_EVERY`
   (6 h) old, from `OVERLAP` (5 days) before it; a failure retries after 30 min.
   `sync_finances` syncs on request, refused within an hour of the last.
@@ -381,7 +382,10 @@ URL that could be logged.
   A pending transaction posts under a new id, so each sync deletes the pending ones
   in its window before saving. The Bridge's live responses (protocol v1 by default)
   carry `payee`, `memo`, `mcc` and `holdings`, beyond the published spec; v2's
-  `errlist`/`connections` are read too.
+  `errlist`/`connections` are read too. The operator's banks (first sync,
+  2026-10-16: Bank of America, a credit union, Amex; 7 accounts) fill `payee` on
+  every transaction but send no `mcc`, `memo` or pending ones, so the MCC
+  categories come out all "Uncategorized" for them.
 - **Prompt and tools.** Balances (and the top holdings) are a context block every
   turn; it changes only when a sync lands. `finance_transactions(start, end,
   account, query, direction, limit)`: local dates, end included, default the last
@@ -490,7 +494,8 @@ Later — candidates, not commitments
 - [x] Gmail: search, read, drafts unasked; send, delete draft, organise ask first
 - [x] Mail alerts: Important+Primary, always/never rules, quiet hours (live-checked)
 - [ ] Mail alerts: AI triage (small model) for mail outside Primary, if too quiet
-- [ ] Finance: SimpleFIN sync, balances, transactions, spending summaries (built; needs the operator's token and a live check)
+- [x] Finance: SimpleFIN sync, balances, transactions, spending summaries (first real sync 2026-10-16)
+- [ ] Finance: categories for banks that send no merchant code (the operator's do not)
 - [ ] Finance: budgets and planning on top (targets per category, alerts when over)
 - [x] Dashboard: a view of the to-do list
 - [x] Commands: `/reset` (start a fresh window), `/status`
