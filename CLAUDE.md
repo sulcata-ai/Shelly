@@ -439,7 +439,7 @@ Later — candidates, not commitments
 - [ ] More capabilities (to be chosen) as modules in `capabilities/`
 - [x] Google Calendar: agenda block, event tools behind approval
 - [x] Gmail: search, read, drafts unasked; send, delete draft, organise ask first
-- [ ] Mail alerts: built and unit-tested; needs a restart and a live check
+- [x] Mail alerts: Important+Primary, always/never rules, quiet hours (live-checked)
 - [ ] Mail alerts: AI triage (small model) for mail outside Primary, if too quiet
 - [x] Dashboard: a view of the to-do list
 - [x] Commands: `/reset` (start a fresh window), `/status`
