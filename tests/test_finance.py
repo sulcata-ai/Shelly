@@ -275,7 +275,7 @@ class Tools(unittest.TestCase):
 
     def test_transactions_filter_by_account_text_and_direction(self):
         text = self.call('finance_transactions', start='', end='', account='sapphire', query='blue',
-                         direction='out', limit=50)
+                         direction='out', limit=50, category='')
 
         self.assertIn('2 transactions', text)
         self.assertIn('-$12.00', text)
@@ -285,7 +285,7 @@ class Tools(unittest.TestCase):
 
     def test_an_unknown_account_is_an_error(self):
         _, error = run(self.registry.run('finance_transactions', dict(
-            start='', end='', account='amex', query='', direction='all', limit=10)))
+            start='', end='', account='amex', query='', direction='all', limit=10, category='')))
 
         self.assertTrue(error)
 
@@ -302,13 +302,59 @@ class Tools(unittest.TestCase):
         self.assertIn('- Groceries: out -$42.10 (1)', text)
         self.assertIn('- Uncategorized: in $2,000.00 (1)', text)
 
+    def test_a_category_summary_lists_merchants_still_to_sort(self):
+        text = self.call('spending_summary', start='', end='', account='', group='category')
+
+        self.assertIn('Merchants with no category yet (1,', text)
+        self.assertIn('Acme Payroll ($2,000.00, 1)', text)
+
+    def test_assigned_categories_win_and_cover_past_transactions(self):
+        result = self.call('categorize', assignments=[
+            {'merchant': 'ACME PAYROLL', 'category': 'Income'},
+            {'merchant': 'Whole Foods #9', 'category': 'Groceries & household'},
+        ])
+        text = self.call('spending_summary', start='', end='', account='', group='category')
+
+        self.assertIn('Saved 2', result)
+        self.assertIn('- Income: in $2,000.00 (1)', text)
+        self.assertIn('- Groceries & household: out -$42.10 (1)', text)
+        self.assertNotIn('no category yet', text)
+
+    def test_an_empty_category_removes_the_assignment(self):
+        self.call('categorize', assignments=[{'merchant': 'Acme Payroll', 'category': 'Income'}])
+        result = self.call('categorize', assignments=[{'merchant': 'Acme Payroll', 'category': ''}])
+
+        self.assertIn('Removed: Acme Payroll', result)
+        self.assertIn('No categories assigned yet', self.call('merchant_categories', query=''))
+
+    def test_transactions_filter_by_category_and_show_it(self):
+        self.call('categorize', assignments=[{'merchant': 'Blue Bottle', 'category': 'Coffee'}])
+        text = self.call('finance_transactions', start='', end='', account='', query='', direction='all',
+                         limit=50, category='coffee')
+
+        self.assertIn('1 transactions', text)
+        self.assertIn('· Coffee', text)
+
+    def test_categories_are_listed_grouped(self):
+        self.call('categorize', assignments=[{'merchant': 'Acme Payroll', 'category': 'Income'},
+                                              {'merchant': 'Blue Bottle', 'category': 'Dining'}])
+
+        self.assertEqual(self.call('merchant_categories', query=''), 'Dining: Blue Bottle\nIncome: Acme Payroll')
+        self.assertEqual(self.call('merchant_categories', query='income'), 'Income: Acme Payroll')
+
+    def test_too_many_at_once_is_refused(self):
+        _, error = run(self.registry.run('categorize', {'assignments': [
+            {'merchant': f'm{i}', 'category': 'Other'} for i in range(101)]}))
+
+        self.assertTrue(error)
+
     def test_merchants_group_by_payee_or_cleaned_description(self):
         self.assertEqual(finance.merchant({'description': 'SQ *BLUE BOTTLE 10/14'}), 'Sq Blue Bottle')
         self.assertEqual(finance.merchant({'description': 'x', 'payee': "JOHN'S SHACK"}), "John's Shack")
 
     def test_a_period_before_the_synced_history_says_so(self):
         text = self.call('finance_transactions', start='2025-01-01', end='', account='', query='',
-                         direction='all', limit=5)
+                         direction='all', limit=5, category='')
 
         self.assertIn('only goes back to', text)
 

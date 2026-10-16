@@ -390,12 +390,24 @@ URL that could be logged.
   turn; it changes only when a sync lands. `finance_transactions(start, end,
   account, query, direction, limit)`: local dates, end included, default the last
   30 days; `account` matches part of an account or bank name; `query` searches
-  description, payee and memo. `spending_summary(start, end, account, group)`:
-  out, in and net, grouped by `category` (from the MCC via `MCC` ranges; only card
-  purchases have one), `merchant` (payee, else the description without numbers),
-  `account` or `month`. Transfers between own accounts are paired (`transfers()`:
+  description, payee and memo; `category` filters to one category, and each line
+  shows its category. `spending_summary(start, end, account, group)`: out, in and
+  net, grouped by `category`, `merchant` (payee, else the description without
+  numbers), `account` or `month`. Transfers between own accounts are paired (`transfers()`:
   money out of one account, the same amount into another within 4 days) and left out
   of the totals. Results open with `UNTRUSTED` (merchant text is data).
+- **Categories.** A transaction's category is the one assigned to its merchant
+  (collection `fin_categories`, `_id` the merchant name as the summaries show it,
+  lowercased: `{category, updated_at}`), else the MCC's (`MCC` ranges), else
+  `Uncategorized`. Claude assigns them with `categorize(assignments: [{merchant,
+  category}])` (up to 100 a call, empty category removes; names pass through
+  `merchant()` so a raw "KROGER #123" lands on "kroger"), preferring
+  `CATEGORY_NAMES`, and lists them with `merchant_categories(query)`. A category
+  summary ends with up to `UNSORTED_SHOWN` (80) uncategorized merchants, biggest
+  first, and the tool description tells Claude to assign them and summarize
+  again before answering. In the first live check (real data, September) it
+  sorted 60 merchants in two rounds for $0.17; it then reports the guesses it is
+  unsure of so the operator can correct them.
 - **Errors are told once.** Bank messages from the account set (a connection that
   needs signing in again) are sent as "🏦 Your bank connection reported" when new;
   a 402 (subscription lapsed) or 403 (access revoked) as "🏦 Bank sync stopped",
@@ -495,7 +507,7 @@ Later — candidates, not commitments
 - [x] Mail alerts: Important+Primary, always/never rules, quiet hours (live-checked)
 - [ ] Mail alerts: AI triage (small model) for mail outside Primary, if too quiet
 - [x] Finance: SimpleFIN sync, balances, transactions, spending summaries (first real sync 2026-10-16)
-- [ ] Finance: categories for banks that send no merchant code (the operator's do not)
+- [x] Finance: merchant categories Shelly assigns (the operator's banks send no merchant code)
 - [ ] Finance: budgets and planning on top (targets per category, alerts when over)
 - [x] Dashboard: a view of the to-do list
 - [x] Commands: `/reset` (start a fresh window), `/status`

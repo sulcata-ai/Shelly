@@ -1,6 +1,7 @@
 ''' the operator's bank and card data as last synced from SimpleFIN
 
-Three collections, written only by the sync (capabilities/finance.py):
+Three collections written only by the sync (capabilities/finance.py), and one by
+the categorize tool:
 
 - fin_accounts: one document per account, _id the SimpleFIN account id:
   {name, institution, currency, balance, available, balance_at, holdings, synced_at};
@@ -11,8 +12,11 @@ Three collections, written only by the sync (capabilities/finance.py):
   category code) are there when the bank gives them; empty otherwise.
   amount is the bank's decimal string (negative is money out), kept exact;
   at is when it happened (transacted_at, else posted), UTC.
-- fin_sync, _id "state": {synced_at, window_start, errors} -- when the last
-  sync succeeded, and the bank errors already told to the operator.
+- fin_sync, _id "state": {synced_at, history_from, errors, failure} -- when the
+  last sync succeeded, how far back the data goes, and what was already told.
+- fin_categories: one per merchant, _id the merchant's lowercased name as the
+  summaries show it: {category, updated_at}. Shelly assigns them; they apply to
+  past and future transactions alike.
 
 A pending transaction usually comes back under a new id once it posts, so each
 sync removes the pending ones it covers before saving what the bank says now.
@@ -27,6 +31,7 @@ from pymongo import ReplaceOne
 ACCOUNTS = 'fin_accounts'
 TRANSACTIONS = 'fin_transactions'
 SYNC = 'fin_sync'
+CATEGORIES = 'fin_categories'
 
 
 def _when(epoch):
@@ -101,6 +106,7 @@ class Finance:
         self.accounts_docs = db[ACCOUNTS]
         self.transactions_docs = db[TRANSACTIONS]
         self.sync_docs = db[SYNC]
+        self.category_docs = db[CATEGORIES]
 
     async def ensure_indexes(self):
         await self.transactions_docs.create_index([('at', -1)])
@@ -156,3 +162,15 @@ class Finance:
             query['account_id'] = {'$in': list(account_ids)}
 
         return await self.transactions_docs.find(query).sort('at', -1).to_list()
+
+    async def categories(self):
+        ''' merchant key -> category '''
+
+        return {d['_id']: d['category'] for d in await self.category_docs.find({}).to_list()}
+
+    async def set_category(self, key, category, now):
+        await self.category_docs.replace_one(
+            {'_id': key}, {'_id': key, 'category': category, 'updated_at': now}, upsert=True)
+
+    async def remove_category(self, key):
+        return (await self.category_docs.delete_one({'_id': key})).deleted_count > 0
