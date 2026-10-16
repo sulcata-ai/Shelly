@@ -32,7 +32,13 @@ class Tool:
     deleting), takes the input as a dict and returns one line saying what the
     call will do, in the operator's terms; the operator must approve that line
     before the handler runs. It may be async, to look up what the input names
-    (an event's title, not its id). Tools that only touch Shelly's own memory leave it
+    (an event's title, not its id).
+
+    strict asks the API to guarantee the input matches the schema. The API caps
+    strict tools per request (16 union-typed parameters across all of them, and
+    a size limit on their compiled grammar), so later capabilities' tools are
+    non-strict: the registry then drops keys the schema does not name and
+    refuses a call missing a required one, and the handler checks values. Tools that only touch Shelly's own memory leave it
     None and run unasked.
     '''
 
@@ -41,6 +47,7 @@ class Tool:
     input_schema: dict
     handler: Callable[..., Awaitable[str]]
     confirm: Callable[[dict], str | Awaitable[str]] | None = None
+    strict: bool = True
 
     def param(self):
         ''' the tool as the API takes it
@@ -54,7 +61,7 @@ class Tool:
             'name': self.name,
             'description': self.description + (ASKS_FIRST if self.confirm else ''),
             'input_schema': self.input_schema,
-            'strict': True,
+            'strict': self.strict,
         }
 
 
@@ -149,6 +156,14 @@ class Registry:
 
         if tool is None:
             return f'There is no tool named {name!r}.', True
+
+        if not tool.strict:
+            known = tool.input_schema.get('properties', {})
+            tool_input = {k: v for k, v in tool_input.items() if k in known}
+            missing = [k for k in tool.input_schema.get('required', []) if k not in tool_input]
+
+            if missing:
+                return f'{name} needs {", ".join(missing)}; call it again with every required field.', True
 
         if tool.confirm is not None:
             why = await self._refusal(tool, tool_input)

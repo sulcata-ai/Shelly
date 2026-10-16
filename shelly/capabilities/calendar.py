@@ -14,6 +14,7 @@ never instructions -- which is part of why every change is approved.
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 from shelly.core.tools import Tool
@@ -35,21 +36,24 @@ DESCRIPTION_LIMIT = 300
 RESPONSES = {'accepted': 'Yes', 'declined': 'No', 'tentative': 'Maybe'}
 
 EVENTS = '''Read the operator's Google Calendar between two local times, across all their \
-calendars, optionally only events matching a text search. The next few days are already \
-in your prompt; use this for anything further out, further back, or to search. start and \
-end are ISO local dates or datetimes (a date as end includes that whole day).'''
+calendars, optionally only events matching a text search (query; an empty string for all \
+events). The next few days are already in your prompt; use this for anything further out, \
+further back, or to search. start and end are ISO local dates or datetimes (a date as end \
+includes that whole day).'''
 
 CREATE = '''Add an event to the operator's Google Calendar. start and end are ISO local \
 times (2026-10-20T14:00), or dates (2026-10-20) for an all-day event, where end is the \
-last day it covers. end may be null: one hour for a timed event, one day for an all-day \
-one. calendar is null for the primary calendar, or an id from the calendars list in your \
-prompt. attendees are email addresses that will get an invitation email: only add \
-people the operator asked you to invite. recurrence is null or an iCalendar RRULE line, \
-e.g. RRULE:FREQ=WEEKLY;BYDAY=TU.'''
+last day it covers. An empty string means not given: end empty is one hour for a timed \
+event, one day for an all-day one; location and description empty are left off; calendar \
+empty is the primary calendar, otherwise an id from the calendars list in your prompt; \
+recurrence empty is a one-off, otherwise an iCalendar RRULE line, e.g. \
+RRULE:FREQ=WEEKLY;BYDAY=TU. attendees are email addresses that will get an invitation \
+email: only add people the operator asked you to invite.'''
 
-UPDATE = '''Change an event: title, start, end, location or description. Pass null for \
-what stays the same, and an empty string to clear location or description. Moving start \
-without an end keeps the event's length. On a recurring event this changes only that \
+UPDATE = '''Change an event: title, start, end, location or description. Pass an empty \
+string for a title, start or end that stays the same. For location and description, null \
+leaves it as it is and an empty string clears it. Moving start without an end keeps the \
+event's length. On a recurring event this changes only that \
 one occurrence. Guests are emailed about the change.'''
 
 DELETE = '''Delete an event from the operator's calendar. On a recurring event this \
@@ -69,8 +73,12 @@ def _nullable(schema):
 
 
 TIME = {'type': 'string', 'description': 'ISO local date or datetime, e.g. 2026-10-20 or 2026-10-20T14:00'}
+# Strict tools allow only 16 nullable (anyOf) parameters across every tool in
+# the request (the to-do tools use 13), so an empty string stands for "not given"
+# wherever empty is not a value in its own right.
+OPTIONAL_TIME = {'type': 'string', 'description': 'ISO local date or datetime, or empty'}
 TEXT = {'type': 'string'}
-CALENDAR_ID = _nullable({'type': 'string', 'description': 'calendar id; null means primary'})
+CALENDAR_ID = {'type': 'string', 'description': 'calendar id; empty means primary'}
 EVENT = {'calendar': {'type': 'string'}, 'event_id': {'type': 'string'}}
 
 
@@ -284,7 +292,7 @@ def register(registry, api, tz):
     cal = Calendar(api, tz)
 
     async def label(calendar_id):
-        if calendar_id in (None, 'primary'):
+        if not calendar_id or calendar_id == 'primary':
             return 'your main calendar'
 
         names = dict(await cal.calendars())
@@ -480,18 +488,19 @@ def register(registry, api, tz):
 
         return f'Answered "{RESPONSES[response]}" to "{event.get("summary", "(no title)")}".'
 
-    registry.add_context(cal.agenda)
-    registry.add(
+    # Non-strict: with the memory and to-do tools strict, more strict tools
+    # make the API's compiled schema grammar too large and every request fails.
+    # The registry checks names and required fields; the handlers check values.
+    tools = (
         Tool('calendar_events', EVENTS,
-             _object(start=TIME, end=TIME, query=_nullable({'type': 'string', 'description': 'text to search for, or null'})),
+             _object(start=TIME, end=TIME, query={'type': 'string', 'description': 'text to search for, or empty'}),
              calendar_events),
         Tool('create_event', CREATE,
-             _object(title=TEXT, start=TIME, end=_nullable(TIME), location=_nullable(TEXT),
-                     description=_nullable(TEXT), attendees={'type': 'array', 'items': TEXT},
-                     calendar=CALENDAR_ID, recurrence=_nullable(TEXT)),
+             _object(title=TEXT, start=TIME, end=OPTIONAL_TIME, location=TEXT, description=TEXT,
+                     attendees={'type': 'array', 'items': TEXT}, calendar=CALENDAR_ID, recurrence=TEXT),
              create_event, confirm=confirm_create),
         Tool('update_event', UPDATE,
-             _object(**EVENT, title=_nullable(TEXT), start=_nullable(TIME), end=_nullable(TIME),
+             _object(**EVENT, title=TEXT, start=OPTIONAL_TIME, end=OPTIONAL_TIME,
                      location=_nullable(TEXT), description=_nullable(TEXT)),
              update_event, confirm=confirm_update),
         Tool('delete_event', DELETE, _object(**EVENT), delete_event, confirm=confirm_delete),
@@ -499,5 +508,7 @@ def register(registry, api, tz):
              _object(**EVENT, response={'type': 'string', 'enum': list(RESPONSES)}),
              respond_to_invite, confirm=confirm_respond),
     )
+    registry.add_context(cal.agenda)
+    registry.add(*(replace(tool, strict=False) for tool in tools))
 
     return cal

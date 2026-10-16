@@ -119,6 +119,29 @@ class Gate(unittest.TestCase):
         self.assertEqual(self.ran, ['Ana'])
 
 
+class NotStrict(unittest.TestCase):
+    ''' a non-strict tool's input is checked by the registry, since the API no longer is '''
+
+    def setUp(self):
+        self.ran = []
+        self.registry = Registry()
+        self.registry.add(Tool(name='send', description='Send.', input_schema=SCHEMA,
+                               handler=send_tool(self.ran).handler, strict=False))
+
+    def test_the_param_says_not_strict(self):
+        self.assertIs(self.registry.params()[0]['strict'], False)
+
+    def test_unknown_keys_are_dropped(self):
+        self.assertEqual(run(self.registry.run('send', {'to': 'Ana', 'extra': 1})), ('sent to Ana', False))
+
+    def test_a_missing_required_key_is_an_error_claude_can_fix(self):
+        result, is_error = run(self.registry.run('send', {}))
+
+        self.assertTrue(is_error)
+        self.assertIn('needs to', result)
+        self.assertEqual(self.ran, [])
+
+
 class FakeBot:
 
     def __init__(self):

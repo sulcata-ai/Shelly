@@ -129,7 +129,18 @@ needs to know which chat it runs for reads `core.context.current_chat`, which th
 agent sets for each turn. Tool handlers
 are async, take the validated input, and return a string (or raise; the loop turns an
 exception into a `tool_result` with `is_error: true` rather than crashing the turn).
-Define tools with `strict: true` and a full JSON schema.
+Define tools with a full JSON schema. **Strict-tool limits:** the API rejects
+the *whole request* (every message fails, not just one tool) when the strict
+tools together have more than 16 union-typed (`anyOf`/nullable) parameters, or
+when their compiled grammar is too large. The memory and to-do tools are strict
+and use 13 unions. The calendar tools are `strict=False`, and so should later
+capabilities' tools be. For a non-strict tool, `Registry.run()` drops keys the
+schema does not name and refuses a call missing a required one; the handler
+checks values. Prefer an empty string over `null` for "not given".
+`tests/test_calendar.py` `SchemaBudget` counts unions. The grammar size can
+only be checked by sending a request, so **after adding or changing any tool,
+send one real request with every tool registered before restarting the
+service.**
 
 **Approval before side effects.** A tool that acts outside Shelly (sends,
 spends, deletes, runs something) sets `Tool.confirm`: a function from its input

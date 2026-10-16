@@ -158,12 +158,12 @@ class Reading(Setup):
     def test_a_date_end_includes_that_day_and_long_ranges_are_refused(self):
         self.make(timed('e1', '2026-10-20T14:00:00-05:00', '2026-10-20T15:00:00-05:00'))
 
-        text = run(self.tool('calendar_events').handler(start='2026-10-20', end='2026-10-20', query=None))
+        text = run(self.tool('calendar_events').handler(start='2026-10-20', end='2026-10-20', query=''))
         self.assertIn('Tue 20 Oct', text)
         self.assertIn('14:00-15:00 Dentist', text)
 
         with self.assertRaises(GoogleError):
-            run(self.tool('calendar_events').handler(start='2026-01-01', end='2026-12-31', query=None))
+            run(self.tool('calendar_events').handler(start='2026-01-01', end='2026-12-31', query=''))
 
     def test_nothing_found_says_so(self):
         self.make()
@@ -172,8 +172,8 @@ class Reading(Setup):
 
 
 def create_input(**overrides):
-    base = dict(title='Dentist', start='2026-10-20T14:00', end=None, location=None, description=None,
-                attendees=[], calendar=None, recurrence=None)
+    base = dict(title='Dentist', start='2026-10-20T14:00', end='', location='', description='',
+                attendees=[], calendar='', recurrence='')
     base.update(overrides)
     return base
 
@@ -222,7 +222,7 @@ ORIGINAL = timed('e1', '2026-10-20T14:00:00-05:00', '2026-10-20T15:30:00-05:00',
 class Changing(Setup):
 
     def update(self, **overrides):
-        base = dict(calendar='primary', event_id='e1', title=None, start=None, end=None, location=None, description=None)
+        base = dict(calendar='primary', event_id='e1', title='', start='', end='', location=None, description=None)
         base.update(overrides)
         return base
 
@@ -270,6 +270,49 @@ class Changing(Setup):
         run(self.cal.agenda())
         run(self.tool('delete_event').handler(calendar='primary', event_id='e1'))
         self.assertIsNone(self.cal._agenda)
+
+
+def unions(schema):
+    ''' parameters the API counts as union-typed: anyOf or a list of types, nested ones too '''
+
+    count = 0
+
+    for prop in schema.get('properties', {}).values():
+        count += 'anyOf' in prop or isinstance(prop.get('type'), list)
+        items = prop.get('items') if prop.get('type') == 'array' else None
+        count += unions(prop) + (unions(items) if isinstance(items, dict) else 0)
+
+    return count
+
+
+class SchemaBudget(unittest.TestCase):
+    ''' every tool Shelly registers, as __main__ does, against the API's strict-tool limits
+
+    Past them the API rejects every request -- every message fails, not just
+    calendar ones. Two limits: 16 union-typed parameters across the strict
+    tools (checked here), and a size cap on their compiled grammar, which can
+    only be checked by sending a request (see CLAUDE.md).
+    '''
+
+    LIMIT = 16
+
+    def test_all_tools_together_stay_within_the_limit(self):
+        from shelly.capabilities import memory, todo
+
+        registry = Registry()
+        memory.register(registry, None)
+        todo.register(registry, type('Tasks', (), {'tz': TZ})())
+        register(registry, FakeGoogle(), TZ)
+        strict = [t for t in registry.params() if t['strict']]
+        total = sum(unions(t['input_schema']) for t in strict)
+
+        self.assertLessEqual(total, self.LIMIT, f'{total} union-typed parameters')
+
+    def test_the_calendar_tools_are_not_strict(self):
+        registry = Registry()
+        register(registry, FakeGoogle(), TZ)
+
+        self.assertEqual({t['strict'] for t in registry.params()}, {False})
 
 
 class Login(unittest.TestCase):
