@@ -109,11 +109,14 @@ class FakeCollection:
         found = self.find(query, projection).docs
         return copy.deepcopy(found[0]) if found else None
 
-    async def replace_one(self, query, doc):
+    async def replace_one(self, query, doc, upsert=False):
         found = self._match(query)[:1]
 
         for old in found:
             self.docs[self.docs.index(old)] = copy.deepcopy(doc)
+
+        if not found and upsert:
+            self.docs.append(copy.deepcopy(doc))
 
         return SimpleNamespace(matched_count=len(found))
 
@@ -131,13 +134,29 @@ class FakeCollection:
 
         return dict(doc)
 
-    async def update_one(self, query, update):
-        found = self._match(query)
+    async def update_one(self, query, update, upsert=False):
+        found = self._match(query)[:1]
 
-        for doc in found[:1]:
+        if not found and upsert:
+            found = [dict(query)]
+            self.docs.append(found[0])
+
+        modified = 0
+
+        for doc in found:
             doc.update(update.get('$set', {}))
 
-        return SimpleNamespace(matched_count=len(found[:1]))
+            for key, value in update.get('$addToSet', {}).items():
+                if value not in doc.setdefault(key, []):
+                    doc[key].append(value)
+                    modified = 1
+
+            for key, value in update.get('$pull', {}).items():
+                if value in doc.get(key, []):
+                    doc[key] = [v for v in doc[key] if v != value]
+                    modified = 1
+
+        return SimpleNamespace(matched_count=len(found), modified_count=modified)
 
     async def delete_one(self, query):
         found = self._match(query)[:1]

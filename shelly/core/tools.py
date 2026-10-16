@@ -126,6 +126,10 @@ class Registry:
         For what a capability has to say when nobody asked -- a reminder coming
         due. The channel calls every poller on a timer. A poller marks what it
         returns as handled: it is sent once, not again on the next tick.
+
+        An item may be (chat_id, text, record) instead: text is sent, record is
+        what goes in the history -- the same words plus what Claude will need
+        to act on them next turn (ids) but the operator need not see.
         '''
 
         self._pollers.append(poller)

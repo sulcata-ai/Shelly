@@ -253,7 +253,7 @@ async def tick(bot, agent, allowed, every=TICK):
 
 
 async def tick_once(bot, agent, allowed):
-    for chat_id, text in await agent.registry.poll(datetime.now(timezone.utc)):
+    for chat_id, text, *record in await agent.registry.poll(datetime.now(timezone.utc)):
         if chat_id not in allowed:
             log.warning('not sending to chat %s: it is not allowed', chat_id)
             continue
@@ -264,7 +264,7 @@ async def tick_once(bot, agent, allowed):
             log.exception('could not send an unprompted message to chat %s', chat_id)
             continue
 
-        await agent.inform(chat_id, text)
+        await agent.inform(chat_id, record[0] if record else text)
 
 
 async def keep_typing(bot, chat_id, paused=None):

@@ -41,7 +41,15 @@ RELOGIN = ('Google access has expired or was revoked. The operator needs to log 
 
 
 class GoogleError(Exception):
-    ''' a Google call that did not work; the message is written for Claude '''
+    ''' a Google call that did not work; the message is written for Claude
+
+    status is the HTTP status when Google answered with one, for the callers
+    that treat one specially (404: a history id too old to read from).
+    '''
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 class GoogleAuth:
@@ -113,7 +121,7 @@ class GoogleAuth:
             except (ValueError, KeyError, TypeError):
                 message = response.text[:200]
 
-            raise GoogleError(f'Google said {response.status_code}: {message}')
+            raise GoogleError(f'Google said {response.status_code}: {message}', response.status_code)
 
         return response.json() if response.content else None
 
@@ -187,6 +195,38 @@ class Gmail:
             'format': 'metadata', 'metadataHeaders': ['From', 'To', 'Subject', 'Date']}
 
         return await self.auth.request('GET', f'{GMAIL}/threads/{quote(thread_id, safe="")}', params=params)
+
+    async def profile(self):
+        return await self.auth.request('GET', f'{GMAIL}/profile')
+
+    async def history(self, start):
+        ''' ids of messages added to the inbox since history id start, and the latest history id
+
+        Raises GoogleError with status 404 when start is too old for Gmail to
+        still have (about a week).
+        '''
+
+        ids, page, latest = [], None, start
+
+        while True:
+            params = {'startHistoryId': start, 'historyTypes': 'messageAdded', 'labelId': 'INBOX',
+                      'maxResults': 500}
+
+            if page:
+                params['pageToken'] = page
+
+            body = await self.auth.request('GET', f'{GMAIL}/history', params=params)
+            latest = body.get('historyId', latest)
+
+            for entry in body.get('history', []):
+                for added in entry.get('messagesAdded', []):
+                    if added['message']['id'] not in ids:
+                        ids.append(added['message']['id'])
+
+            page = body.get('nextPageToken')
+
+            if not page:
+                return ids, latest
 
     async def message(self, message_id):
         return await self.auth.request('GET', f'{GMAIL}/messages/{quote(message_id, safe="")}',

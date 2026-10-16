@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 
 from shelly import config, logs
-from shelly.capabilities import calendar, mail, memory, todo
+from shelly.capabilities import calendar, mail, mail_alerts, memory, todo
 from shelly.channels import telegram
 from shelly.core import agent as core
 from shelly.core.prompt import Prompt, load_profile
@@ -16,6 +16,7 @@ from shelly.core.tools import Registry
 from shelly.core.usage import COLLECTION as TURNS, Ledger
 from shelly.integrations.google import CALENDAR_SCOPE, GMAIL_SCOPE, GoogleAuth, GoogleCalendar, Gmail
 from shelly.memory import history
+from shelly.memory.mail_watch import MailWatch
 from shelly.memory.notes import Notes
 from shelly.memory.tasks import Tasks
 from shelly.status import Status
@@ -66,7 +67,11 @@ def main():
                 calendar.register(registry, GoogleCalendar(auth), cfg.timezone)
 
             if GMAIL_SCOPE in auth.scopes:
-                mail.register(registry, Gmail(auth), cfg.timezone)
+                gmail = Gmail(auth)
+                mail.register(registry, gmail, cfg.timezone)
+                # Alerts go to the operator's chat; with several allowed, which is unclear.
+                alert_chat = next(iter(cfg.allowed_chat_ids)) if len(cfg.allowed_chat_ids) == 1 else None
+                mail_alerts.register(registry, gmail, MailWatch(db), cfg.timezone, alert_chat)
 
             log.info('google: calendar %s, gmail %s',
                      *('on' if scope in auth.scopes else 'off (log in again)' for scope in (CALENDAR_SCOPE, GMAIL_SCOPE)))
