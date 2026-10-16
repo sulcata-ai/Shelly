@@ -201,6 +201,14 @@ class Gmail:
 
         return await self.auth.request('POST', f'{GMAIL}/drafts', json={'message': message})
 
+    async def drafts(self, query, limit):
+        body = await self.auth.request('GET', f'{GMAIL}/drafts', params={'q': query, 'maxResults': limit})
+
+        return body.get('drafts', [])
+
+    async def delete_draft(self, draft_id):
+        await self.auth.request('DELETE', f'{GMAIL}/drafts/{quote(draft_id, safe="")}')
+
     async def draft(self, draft_id):
         return await self.auth.request('GET', f'{GMAIL}/drafts/{quote(draft_id, safe="")}', params={'format': 'full'})
 

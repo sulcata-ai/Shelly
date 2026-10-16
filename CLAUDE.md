@@ -303,14 +303,18 @@ Tools, all non-strict:
   messages, each clipped to 3000 characters, text/plain preferred, else HTML as
   text without scripts or styles, `> ` quoted lines dropped, attachments named
   but not read, `[message: id]`), and `create_draft(to, cc, subject, body,
-  reply_to)`. A draft with `reply_to` joins that message's thread, sets
+  reply_to)`, `list_drafts(query)`. A draft with `reply_to` joins that message's thread, sets
   `In-Reply-To` and `References`, and defaults `to` to Reply-To or From and the
   subject to `Re: …`.
 - **Ask first:** `send_draft(draft_id)`; its prompt shows To, Cc, Subject,
   attachments and the first 600 characters, read back from Gmail rather than
-  from Claude's input. `organise_mail(thread_ids, action)`: archive, trash,
+  from Claude's input. `delete_draft(draft_id)` (permanent). `organise_mail(thread_ids, action)`: archive, trash,
   mark read or unread, up to 25 threads in one prompt, each named by subject and
   sender.
+- **Ids do not survive a turn**: only reply text is stored, never tool results, so
+  "send it" in the next message has no draft id. `send_draft`'s description tells
+  Claude to find it with `list_drafts` and never to create it again. In the first
+  live check it re-created the draft and left a duplicate behind.
 - Sending is therefore always draft-then-send. There is **no inbox block** in the
   prompt (it would cost a Gmail call per turn, break the cache on every new mail,
   and show strangers' subjects unasked). Search and read results open with

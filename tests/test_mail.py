@@ -42,7 +42,7 @@ class FakeGmail:
     def __init__(self, threads=None, messages=None, drafts=None):
         self.threads_ = threads or {}
         self.messages = messages or {}
-        self.drafts = drafts or {}
+        self.saved = drafts or {}
         self.calls = []
 
     async def threads(self, query, limit):
@@ -62,7 +62,14 @@ class FakeGmail:
         return {'id': 'd1'}
 
     async def draft(self, draft_id):
-        return self.drafts[draft_id]
+        return self.saved[draft_id]
+
+    async def drafts(self, query, limit):
+        self.calls.append(('drafts', query, limit))
+        return [{'id': d} for d in self.saved]
+
+    async def delete_draft(self, draft_id):
+        self.calls.append(('delete_draft', draft_id))
 
     async def send_draft(self, draft_id):
         self.calls.append(('send', draft_id))
@@ -117,7 +124,7 @@ class Reading(Setup):
         self.make()
 
         asks = {name for name, tool in self.registry._tools.items() if tool.confirm}
-        self.assertEqual(asks, {'send_draft', 'organise_mail'})
+        self.assertEqual(asks, {'send_draft', 'delete_draft', 'organise_mail'})
         self.assertEqual({t['strict'] for t in self.registry.params()}, {False})
 
     def test_search_lists_threads_with_flags_ids_and_a_warning(self):
@@ -199,6 +206,29 @@ class Sending(Setup):
         self.make()
         self.assertEqual(run(self.tool('send_draft').handler(draft_id='d1')), 'Sent [message: m9].')
         self.assertEqual(self.gmail.calls, [('send', 'd1')])
+
+
+class Drafts(Setup):
+    ''' a draft from an earlier message is found again, not made twice '''
+
+    def setUp(self):
+        draft = {'id': 'd1', 'message': message('m5', subject='Shelly Test')}
+        draft['message']['payload']['headers'] = [{'name': 'To', 'value': 'me@example.com'},
+                                                  {'name': 'Subject', 'value': 'Shelly Test'}]
+        self.make(drafts={'d1': draft})
+
+    def test_list_drafts_gives_ids(self):
+        text = run(self.tool('list_drafts').handler(query='subject:"Shelly Test"'))
+
+        self.assertIn('to me@example.com · "Shelly Test"', text)
+        self.assertIn('[draft: d1]', text)
+
+    def test_send_says_never_to_recreate(self):
+        self.assertIn('never create it again', self.tool('send_draft').description)
+
+    def test_deleting_a_draft_asks_and_names_it(self):
+        action = run(self.tool('delete_draft').confirm({'draft_id': 'd1'}))
+        self.assertEqual(action, 'Delete the draft to me@example.com, "Shelly Test", for good')
 
 
 class Organising(Setup):

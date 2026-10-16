@@ -60,10 +60,20 @@ call send_draft with the draft id this returns. To reply, pass the id of the mes
 being answered as reply_to (from read_thread): the draft joins that thread, and an \
 empty to and subject default to the sender and "Re: <subject>". Otherwise reply_to is \
 an empty string. to and cc are email addresses (cc may be empty). Write the body as \
-plain text, in the operator's voice, signed the way they sign.'''
+plain text, in the operator's voice, signed the way they sign. In your reply, mention \
+the draft's subject so it can be found again with list_drafts.'''
 
-SEND = '''Send a draft saved with create_draft. The operator sees the recipients, \
-subject and text and approves before it goes.'''
+SEND = '''Send a saved draft. The operator sees the recipients, subject and text and \
+approves before it goes. Draft ids do not carry over between messages: for a draft made \
+earlier in the conversation, find its id with list_drafts -- never create it again, \
+which would leave a duplicate behind.'''
+
+LIST_DRAFTS = '''The operator's saved drafts, newest first, with their draft ids for \
+send_draft and delete_draft. query uses Gmail search syntax (subject:, to:) or is empty \
+for all.'''
+
+DELETE_DRAFT = '''Delete a saved draft for good (drafts do not go to the trash). The \
+operator approves first.'''
 
 ORGANISE = f'''Organise threads: archive (out of the inbox, kept), trash (to the trash, \
 which Gmail empties after 30 days), mark_read or mark_unread. Up to {MAX_RESULTS} thread \
@@ -288,6 +298,34 @@ def register(registry, api, tz):
 
         return '\n'.join(lines) + '\n\n' + (clip(text, PREVIEW) or '(no text)')
 
+    def draft_line(draft):
+        message = draft.get('message', {})
+        head = headers(message)
+
+        return (f'- to {head.get("to", "(nobody yet)")} · "{head.get("subject", "(no subject)")}" · '
+                f'{when(message)} [draft: {draft["id"]}]')
+
+    async def list_drafts(query):
+        found = await api.drafts(query or '', MAX_RESULTS)
+
+        if not found:
+            return f'No drafts matching {query!r}.' if query else 'There are no drafts.'
+
+        drafts = await asyncio.gather(*(api.draft(d['id']) for d in found))
+
+        return '\n'.join(draft_line(d) for d in drafts)
+
+    async def confirm_delete_draft(i):
+        draft = await api.draft(i['draft_id'])
+        head = headers(draft.get('message', {}))
+
+        return f'Delete the draft to {head.get("to", "(nobody yet)")}, "{head.get("subject", "(no subject)")}", for good'
+
+    async def delete_draft(draft_id):
+        await api.delete_draft(draft_id)
+
+        return 'Draft deleted.'
+
     async def send_draft(draft_id):
         sent = await api.send_draft(draft_id)
 
@@ -346,7 +384,9 @@ def register(registry, api, tz):
              _object(to=STRINGS, cc=STRINGS, subject=TEXT, body=TEXT,
                      reply_to={'type': 'string', 'description': 'message id being answered, or empty'}),
              create_draft),
+        Tool('list_drafts', LIST_DRAFTS, _object(query=TEXT), list_drafts),
         Tool('send_draft', SEND, _object(draft_id=TEXT), send_draft, confirm=confirm_send),
+        Tool('delete_draft', DELETE_DRAFT, _object(draft_id=TEXT), delete_draft, confirm=confirm_delete_draft),
         Tool('organise_mail', ORGANISE,
              _object(thread_ids=STRINGS, action={'type': 'string', 'enum': list(ACTIONS)}),
              organise_mail, confirm=confirm_organise),
