@@ -95,8 +95,19 @@ class FakeCollection:
     async def create_index(self, keys, unique=False):
         pass
 
+    @staticmethod
+    def _test(value, condition):
+        if not isinstance(condition, dict):
+            return value == condition
+
+        checks = {'$gte': lambda c: value is not None and value >= c,
+                  '$lt': lambda c: value is not None and value < c,
+                  '$in': lambda c: value in c}
+
+        return all(checks[op](c) for op, c in condition.items())
+
     def _match(self, query):
-        return [d for d in self.docs if all(d.get(k) == v for k, v in query.items())]
+        return [d for d in self.docs if all(self._test(d.get(k), v) for k, v in query.items())]
 
     def find(self, query, projection=None):
         hidden = {k for k, v in (projection or {}).items() if not v}
@@ -165,6 +176,20 @@ class FakeCollection:
             self.docs.remove(doc)
 
         return SimpleNamespace(deleted_count=len(found))
+
+
+    async def delete_many(self, query):
+        found = self._match(query)
+
+        for doc in found:
+            self.docs.remove(doc)
+
+        return SimpleNamespace(deleted_count=len(found))
+
+    async def bulk_write(self, requests, ordered=True):
+        # Only ReplaceOne is used; pymongo keeps its arguments in _filter, _doc, _upsert.
+        for request in requests:
+            await self.replace_one(request._filter, request._doc, upsert=request._upsert)
 
 
 class FakeDb(dict):

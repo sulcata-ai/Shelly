@@ -8,14 +8,16 @@ from pathlib import Path
 import httpx
 
 from shelly import config, logs
-from shelly.capabilities import calendar, mail, mail_alerts, memory, todo
+from shelly.capabilities import calendar, finance, mail, mail_alerts, memory, todo
 from shelly.channels import telegram
 from shelly.core import agent as core
 from shelly.core.prompt import Prompt, load_profile
 from shelly.core.tools import Registry
 from shelly.core.usage import COLLECTION as TURNS, Ledger
 from shelly.integrations.google import CALENDAR_SCOPE, GMAIL_SCOPE, GoogleAuth, GoogleCalendar, Gmail
+from shelly.integrations.simplefin import SimpleFin
 from shelly.memory import history
+from shelly.memory.finance import Finance
 from shelly.memory.mail_watch import MailWatch
 from shelly.memory.notes import Notes
 from shelly.memory.tasks import Tasks
@@ -56,6 +58,8 @@ def main():
         todo.register(registry, tasks)
 
         google = None
+        # Mail alerts and bank notices go to the operator's chat; with several allowed, which is unclear.
+        operator_chat = next(iter(cfg.allowed_chat_ids)) if len(cfg.allowed_chat_ids) == 1 else None
 
         if Path(cfg.google_token_path).exists():
             google = httpx.AsyncClient(timeout=20)
@@ -69,9 +73,7 @@ def main():
             if GMAIL_SCOPE in auth.scopes:
                 gmail = Gmail(auth)
                 mail.register(registry, gmail, cfg.timezone)
-                # Alerts go to the operator's chat; with several allowed, which is unclear.
-                alert_chat = next(iter(cfg.allowed_chat_ids)) if len(cfg.allowed_chat_ids) == 1 else None
-                mail_alerts.register(registry, gmail, MailWatch(db), cfg.timezone, alert_chat)
+                mail_alerts.register(registry, gmail, MailWatch(db), cfg.timezone, operator_chat)
 
             log.info('google: calendar %s, gmail %s',
                      *('on' if scope in auth.scopes else 'off (log in again)' for scope in (CALENDAR_SCOPE, GMAIL_SCOPE)))
@@ -79,12 +81,26 @@ def main():
             log.info('google off: no login saved at %s (python -m shelly.google_login)',
                      cfg.google_token_path)
 
+        bank = None
+
+        if Path(cfg.simplefin_token_path).exists():
+            bank = httpx.AsyncClient(timeout=60)
+            money = Finance(db)
+            await money.ensure_indexes()
+            finance.register(registry, SimpleFin.load(cfg.simplefin_token_path, bank), money,
+                             cfg.timezone, operator_chat)
+            log.info('finance on (SimpleFIN)')
+        else:
+            log.info('finance off: no SimpleFIN access saved at %s (python -m shelly.simplefin_login)',
+                     cfg.simplefin_token_path)
+
         async def stop():
             await claude.close()
             await mongo.close()
 
-            if google is not None:
-                await google.aclose()
+            for http in (google, bank):
+                if http is not None:
+                    await http.aclose()
 
         prompt = Prompt(load_profile(cfg.profile_path))
 

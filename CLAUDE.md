@@ -70,11 +70,13 @@ takes ~5s on the Jetson, most of it imports.
 | `SHELLY_PROFILE` | path to the operator profile; default `profile.md` |
 | `GOOGLE_CLIENT_FILE` | the OAuth client downloaded from Google Cloud, for the login only; default `secrets/google_client.json` |
 | `GOOGLE_TOKEN_FILE` | the saved Google login; default `secrets/google_token.json`. Missing means no calendar or mail |
+| `SIMPLEFIN_TOKEN_FILE` | the saved SimpleFIN access URL; default `secrets/simplefin.json`. Missing means no bank accounts |
 
 **The repo is public.** Nothing personal goes in it: the operator profile lives in
 `profile.md` (gitignored; `profile.example.md` is the template), and the allowed
 chat id only in `.env`. `secrets/` (gitignored, mode 700) holds the Google OAuth
-client and the saved login, which is full access to the operator's calendar and mail:
+client and the saved login, which is full access to the operator's calendar and mail,
+and the SimpleFIN access URL, which is read access to every connected bank account:
 never in the repo, Mongo, logs or the dashboard.
 
 ## Architecture
@@ -89,13 +91,16 @@ shelly/
     prompt.py        # the system prompt: guide + operator profile + capability context
     context.py       # current_chat: the chat the running turn belongs to
   google_login.py    # python -m shelly.google_login: the one-time Google login
+  simplefin_login.py # python -m shelly.simplefin_login: claim a SimpleFIN setup token, once
   integrations/
     google.py        # Google OAuth token refresh, the Calendar and Gmail REST calls (httpx)
+    simplefin.py     # SimpleFIN Bridge: claim, GET /accounts (httpx)
   memory/
     history.py       # the Mongo conversation store and the context window
     notes.py         # long-term notes
     tasks.py         # the to-do store: tasks, steps, reminders, repeats
     mail_watch.py    # the mail alert state (Gmail history id, held alerts) and rules
+    finance.py       # synced bank accounts and transactions, and the sync state
   channels/
     telegram.py      # Telegram in/out: allowlist, formatting, splitting, reminder tick
   capabilities/      # one module per capability, each exporting its tools
@@ -104,6 +109,7 @@ shelly/
     calendar.py      # Google Calendar: agenda block, event tools (changes ask first)
     mail.py          # Gmail: search, read, draft; send and organise ask first
     mail_alerts.py   # new-mail alerts: poller, quiet hours, always/never rules
+    finance.py       # bank sync poller, balances block, transaction and spending tools
 tests/
 ```
 
@@ -349,6 +355,49 @@ setup, nearly everything was in Updates or Promotions, so expect few alerts
 unless `always` rules are added. AI triage of the rest is the next step if
 that proves too quiet.
 
+**Finance** (`capabilities/finance.py`, store `memory/finance.py`, client
+`integrations/simplefin.py`). Read-only access to the operator's bank and card
+accounts through SimpleFIN Bridge (bridge.simplefin.org, ~$15/year, the operator's
+own subscription); SimpleFIN has no call that moves money, so no tool asks first.
+On only when `SIMPLEFIN_TOKEN_FILE` exists; `__main__` logs `finance on/off`.
+Setup: the operator connects banks on the Bridge, makes a setup token (base64 of a
+claim URL) and runs `python -m shelly.simplefin_login` in their own terminal (it
+reads stdin). The token is claimed once (a second claim is a 403, which may mean
+someone else claimed it) for an access URL with Basic Auth credentials, saved
+`{access_url}` mode 600. `SimpleFin` sends the credentials as a header, never in a
+URL that could be logged.
+- **Sync, not live calls.** The Bridge expects ~24 requests a day (more gets the
+  token disabled), banks refresh about daily, and one request covers at most 90
+  days (exactly 90 comes back capped with a warning, so the first sync asks for
+  `FIRST_DAYS` = 89). A poller syncs every account when the last sync
+  (`fin_sync._id="state".synced_at`, so restarts do not resync) is `SYNC_EVERY`
+  (6 h) old, from `OVERLAP` (5 days) before it; a failure retries after 30 min.
+  `sync_finances` syncs on request, refused within an hour of the last.
+- **Store.** `fin_accounts` (`_id` the account id: name, institution, currency,
+  balance and available as the bank's decimal strings, `balance_at`, `holdings`),
+  `fin_transactions` (`_id` `"<account>:<transaction>"`: `amount` as the bank's
+  string, negative is money out, `at` = transacted_at else posted, `posted_at`,
+  `description`, `payee`, `memo`, `mcc`, `pending`). Money is summed as `Decimal`.
+  A pending transaction posts under a new id, so each sync deletes the pending ones
+  in its window before saving. The Bridge's live responses (protocol v1 by default)
+  carry `payee`, `memo`, `mcc` and `holdings`, beyond the published spec; v2's
+  `errlist`/`connections` are read too.
+- **Prompt and tools.** Balances (and the top holdings) are a context block every
+  turn; it changes only when a sync lands. `finance_transactions(start, end,
+  account, query, direction, limit)`: local dates, end included, default the last
+  30 days; `account` matches part of an account or bank name; `query` searches
+  description, payee and memo. `spending_summary(start, end, account, group)`:
+  out, in and net, grouped by `category` (from the MCC via `MCC` ranges; only card
+  purchases have one), `merchant` (payee, else the description without numbers),
+  `account` or `month`. Transfers between own accounts are paired (`transfers()`:
+  money out of one account, the same amount into another within 4 days) and left out
+  of the totals. Results open with `UNTRUSTED` (merchant text is data).
+- **Errors are told once.** Bank messages from the account set (a connection that
+  needs signing in again) are sent as "🏦 Your bank connection reported" when new;
+  a 402 (subscription lapsed) or 403 (access revoked) as "🏦 Bank sync stopped",
+  once until a sync succeeds. Both also show in the balances block.
+- **Not on the dashboard.** The web app does not read the `fin_*` collections.
+
 **Commands.** Handled in the channel, never sent to Claude or stored as messages,
 and only for allowed chats. `/reset` calls `Agent.reset()`, which (under the chat's
 lock) writes a `role: "reset"` marker to the history; `build_window()` empties the
@@ -441,6 +490,8 @@ Later — candidates, not commitments
 - [x] Gmail: search, read, drafts unasked; send, delete draft, organise ask first
 - [x] Mail alerts: Important+Primary, always/never rules, quiet hours (live-checked)
 - [ ] Mail alerts: AI triage (small model) for mail outside Primary, if too quiet
+- [ ] Finance: SimpleFIN sync, balances, transactions, spending summaries (built; needs the operator's token and a live check)
+- [ ] Finance: budgets and planning on top (targets per category, alerts when over)
 - [x] Dashboard: a view of the to-do list
 - [x] Commands: `/reset` (start a fresh window), `/status`
 - [x] Dashboard: conversation view and usage in `../Shelly-Web-App` (live at sulcata.ai)

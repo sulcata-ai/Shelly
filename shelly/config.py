@@ -27,6 +27,7 @@ class Config:
     timezone: ZoneInfo
     profile_path: str
     google_token_path: str
+    simplefin_token_path: str
 
     def __repr__(self):
         # Never the secrets: this ends up in logs and tracebacks.
@@ -122,4 +123,6 @@ def load(env=None):
         profile_path=(env.get('SHELLY_PROFILE') or 'profile.md').strip(),
         # Optional: without a saved Google login, Shelly runs without the calendar.
         google_token_path=(env.get('GOOGLE_TOKEN_FILE') or 'secrets/google_token.json').strip(),
+        # Optional too: without a saved SimpleFIN access, no bank accounts.
+        simplefin_token_path=(env.get('SIMPLEFIN_TOKEN_FILE') or 'secrets/simplefin.json').strip(),
     )
